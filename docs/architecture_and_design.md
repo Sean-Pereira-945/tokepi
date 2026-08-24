@@ -32,7 +32,7 @@ graph TD
     end
 
     subgraph Persistent Storage
-        Database[(SQLite / SQLAlchemy)]
+        Database[("SQLite / SQLAlchemy")]
     end
 
     subgraph Frontend Interface
