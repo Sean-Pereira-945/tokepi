@@ -20,23 +20,23 @@ DriftGuard is designed to solve runtime degradation and cost overrun issues in L
 
 ```mermaid
 graph TD
-    subgraph Client Application
-        AgentLoop[Agent Execution Loop]
-        DG_SDK[DriftGuard SDK Client]
+    subgraph "Client Application"
+        AgentLoop["Agent Execution Loop"]
+        DG_SDK["DriftGuard SDK Client"]
     end
 
-    subgraph DriftGuard Backend (FastAPI)
-        API_Gateway[API Ingestion Layer]
-        DiagEngine[Diagnosis & Analytics Engine]
-        MitEngine[Mitigation Recommendation Engine]
+    subgraph "DriftGuard Backend (FastAPI)"
+        API_Gateway["API Ingestion Layer"]
+        DiagEngine["Diagnosis & Analytics Engine"]
+        MitEngine["Mitigation Recommendation Engine"]
     end
 
-    subgraph Persistent Storage
+    subgraph "Persistent Storage"
         Database[("SQLite / SQLAlchemy")]
     end
 
-    subgraph Frontend Interface
-        Dashboard[Web Dashboard UI]
+    subgraph "Frontend Interface"
+        Dashboard["Web Dashboard UI"]
     end
 
     AgentLoop -->|1. Capture Telemetry & Events| DG_SDK
