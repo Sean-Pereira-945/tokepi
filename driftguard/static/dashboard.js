@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let currentProject = 'antigravity-live';
   let currentEnv = 'prod';
+  let isLoadingDashboard = false;
   const apiKeyInput = document.getElementById('dashboard-api-key');
   if (apiKeyInput) apiKeyInput.value = window.localStorage.getItem('driftguard_api_key') || '';
 
@@ -34,6 +35,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (projectForm) {
     projectForm.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (!projectForm.checkValidity()) {
+        projectForm.reportValidity();
+        return;
+      }
+      const submitButton = projectForm.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
       const payload = {
         project_id: document.getElementById('new-project-id').value.trim(),
         name: document.getElementById('new-project-name').value.trim(),
@@ -64,10 +71,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (projectSelect) projectSelect.value = currentProject;
         await loadDashboardData();
       } catch (error) {
+        const message = error instanceof Error ? error.message : 'Project creation failed. Please try again.';
         if (projectCreateStatus) {
-          projectCreateStatus.textContent = error.message;
-          projectCreateStatus.style.color = '#D4D4D8';
+          projectCreateStatus.textContent = message;
+          projectCreateStatus.style.color = '#FDA4AF';
         }
+        setStatus(message, true);
+      } finally {
+        if (submitButton) submitButton.disabled = false;
       }
     });
   }
@@ -80,6 +91,34 @@ document.addEventListener('DOMContentLoaded', () => {
     status.classList.add('visible');
     window.clearTimeout(setStatus.timer);
     setStatus.timer = window.setTimeout(() => status.classList.remove('visible'), 3500);
+  }
+
+  function setLoading(loading) {
+    isLoadingDashboard = loading;
+    const indicator = document.getElementById('dashboard-loading-indicator');
+    const mainContent = document.querySelector('.main-content');
+    const refreshButton = document.getElementById('refresh-btn');
+    if (indicator) indicator.hidden = !loading;
+    if (mainContent) mainContent.setAttribute('aria-busy', String(loading));
+    if (refreshButton) refreshButton.disabled = loading;
+  }
+
+  async function responseError(response, fallbackMessage) {
+    let detail = '';
+    try {
+      const payload = await response.json();
+      detail = payload.detail || '';
+    } catch (error) {
+      // The backend may return an empty or non-JSON response for infrastructure errors.
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return 'Access denied. Check that the selected project and DriftGuard API key match.';
+    }
+    if (response.status === 404) {
+      return 'Project not found. Create or select an available project.';
+    }
+    return detail || `${fallbackMessage} (${response.status})`;
   }
 
   // ---------------------------------------------------------------------------
@@ -174,6 +213,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (telemetryForm) {
     telemetryForm.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (!telemetryForm.checkValidity()) {
+        telemetryForm.reportValidity();
+        return;
+      }
+      const submitButton = telemetryForm.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
       const eventData = {
         prompt_tokens: parseFloat(document.getElementById('input-prompt-tokens').value),
         context_length: parseFloat(document.getElementById('input-context-length').value),
@@ -195,8 +240,11 @@ document.addEventListener('DOMContentLoaded', () => {
         setStatus('Telemetry event posted');
         loadDashboardData();
       } catch (err) {
+        const message = err instanceof Error ? err.message : 'Telemetry event failed. Please try again.';
         console.error('Failed to send telemetry event:', err);
-        setStatus('Telemetry event failed', true);
+        setStatus(message, true);
+      } finally {
+        if (submitButton) submitButton.disabled = false;
       }
     });
   }
@@ -210,6 +258,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (policyForm) {
     policyForm.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (!policyForm.checkValidity()) {
+        policyForm.reportValidity();
+        return;
+      }
+      const submitButton = policyForm.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
       const updates = {
         prompt_token_limit: parseFloat(document.getElementById('policy-prompt-limit').value),
         context_length_limit: parseFloat(document.getElementById('policy-context-limit').value),
@@ -231,11 +285,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         setStatus('Policy updated');
       } catch (err) {
+        const message = err instanceof Error ? err.message : 'Policy update failed. Please try again.';
         if (policyStatus) {
-          policyStatus.textContent = '✕ Failed to save policy rules';
-          policyStatus.style.color = '#D4D4D8';
+          policyStatus.textContent = `✕ ${message}`;
+          policyStatus.style.color = '#FDA4AF';
         }
-        setStatus('Policy update failed', true);
+        setStatus(message, true);
+      } finally {
+        if (submitButton) submitButton.disabled = false;
       }
     });
   }
@@ -244,28 +301,38 @@ document.addEventListener('DOMContentLoaded', () => {
   // Styled Dropdowns (Project & Environment)
   // ---------------------------------------------------------------------------
   async function loadProjects() {
+    const select = document.getElementById('project-select');
+    if (select) select.disabled = true;
     try {
       const res = await fetch('/projects', { headers: requestHeaders() });
-      if (res.ok) {
-        const projects = await res.json();
-        const select = document.getElementById('project-select');
-        if (projects && projects.length > 0) {
-          select.innerHTML = projects.map(p => 
+      if (!res.ok) throw new Error(await responseError(res, 'Project list unavailable'));
+      const projects = await res.json();
+      if (projects && projects.length > 0) {
+        if (select) {
+          select.innerHTML = projects.map(p =>
             `<option value="${p.project_id}">${p.name} (${p.project_id})</option>`
           ).join('');
-          
-          const found = projects.find(p => p.project_id === 'antigravity-live');
-          if (found) {
-            currentProject = 'antigravity-live';
-            select.value = 'antigravity-live';
-          } else {
-            currentProject = projects[0].project_id;
-            select.value = currentProject;
-          }
         }
+
+        const found = projects.find(p => p.project_id === 'antigravity-live');
+        currentProject = found ? found.project_id : projects[0].project_id;
+        if (select) select.value = currentProject;
+      } else {
+        currentProject = '';
+        if (select) {
+          select.innerHTML = '<option value="">No projects available</option>';
+          select.value = '';
+        }
+        setStatus('No projects found. Create a project to begin.', false);
       }
     } catch (err) {
+      currentProject = '';
+      if (select) select.innerHTML = '<option value="">Unable to load projects</option>';
+      const message = err instanceof Error ? err.message : 'Unable to load projects.';
       console.warn('Failed to fetch projects list:', err);
+      setStatus(message, true);
+    } finally {
+      if (select) select.disabled = false;
     }
   }
 
@@ -273,7 +340,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (projectSelect) {
     projectSelect.addEventListener('change', (e) => {
       currentProject = e.target.value;
-      loadDashboardData();
+      if (currentProject) {
+        loadDashboardData();
+      } else {
+        renderEmptyDashboard('Select a project or create one to view telemetry.');
+      }
     });
   }
 
@@ -313,23 +384,58 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---------------------------------------------------------------------------
   // Load Main Telemetry & Dashboard Data
   // ---------------------------------------------------------------------------
+  function renderEmptyDashboard(message = 'No telemetry recorded for this project.') {
+    updateMetrics(null, [], []);
+    renderRecentAlerts([]);
+    renderAlertsTable([]);
+    renderCharts([]);
+    renderAgentDiagnosis(null);
+    const diagnosisMessage = document.getElementById('diagnosis-message');
+    if (diagnosisMessage) diagnosisMessage.textContent = message;
+  }
+
   async function loadDashboardData() {
+    if (!currentProject) {
+      setLoading(false);
+      renderEmptyDashboard('Select a project or create one to view telemetry.');
+      return;
+    }
+
+    setLoading(true);
+    setStatus('Loading dashboard data…');
     try {
-      const [summaryRes, eventsRes, alertsRes, diagnosisRes] = await Promise.all([
-        fetch(`/projects/${currentProject}/summary`, { headers: requestHeaders() }).then(r => r.ok ? r.json() : null),
-        fetch(`/events/${currentProject}`, { headers: requestHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`/alerts/${currentProject}`, { headers: requestHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`/projects/${currentProject}/agent-diagnosis`, { headers: requestHeaders() }).then(r => r.ok ? r.json() : null)
+      const responses = await Promise.all([
+        fetch(`/projects/${currentProject}/summary`, { headers: requestHeaders() }),
+        fetch(`/events/${currentProject}`, { headers: requestHeaders() }),
+        fetch(`/alerts/${currentProject}`, { headers: requestHeaders() }),
+        fetch(`/projects/${currentProject}/agent-diagnosis`, { headers: requestHeaders() })
       ]);
 
-      updateMetrics(summaryRes, eventsRes, alertsRes);
-      renderRecentAlerts(alertsRes);
-      renderAlertsTable(alertsRes);
-      renderCharts(eventsRes);
-      renderAgentDiagnosis(diagnosisRes);
+      const [summaryRes, eventsRes, alertsRes, diagnosisRes] = responses;
+      for (const [response, label] of [
+        [summaryRes, 'Dashboard summary unavailable'],
+        [eventsRes, 'Telemetry unavailable'],
+        [alertsRes, 'Alerts unavailable'],
+        [diagnosisRes, 'Agent diagnosis unavailable']
+      ]) {
+        if (!response.ok) throw new Error(await responseError(response, label));
+      }
+
+      const [summary, events, alerts, diagnosis] = await Promise.all(
+        responses.map(response => response.json())
+      );
+      updateMetrics(summary, events, alerts);
+      renderRecentAlerts(alerts);
+      renderAlertsTable(alerts);
+      renderCharts(events);
+      renderAgentDiagnosis(diagnosis);
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Dashboard data unavailable. Please try again.';
       console.warn('Backend API fetching:', err);
-      setStatus('Dashboard data unavailable', true);
+      renderEmptyDashboard('Data could not be loaded. Check the project key and backend connection.');
+      setStatus(message, true);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -341,7 +447,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const wastedTokens = document.getElementById('diagnosis-wasted-tokens');
     const message = document.getElementById('diagnosis-message');
     const recommendation = document.getElementById('diagnosis-recommendation');
-    if (!status || !diagnosis) return;
+    if (!status) return;
+    if (!diagnosis) {
+      status.textContent = 'NO DATA';
+      status.className = 'diagnosis-badge diagnosis-stable';
+      if (tool) tool.textContent = 'None';
+      if (failures) failures.textContent = '0';
+      if (retries) retries.textContent = '0';
+      if (wastedTokens) wastedTokens.textContent = '0';
+      if (message) message.textContent = 'No agent task diagnosis is available.';
+      if (recommendation) recommendation.textContent = '';
+      return;
+    }
 
     status.textContent = diagnosis.status ? diagnosis.status.toUpperCase() : 'NO DATA';
     status.className = `diagnosis-badge diagnosis-${diagnosis.status || 'stable'}`;
@@ -389,7 +506,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const sampleAlerts = alerts || [];
 
     if (sampleAlerts.length === 0) {
-      stack.innerHTML = '<div class="empty-state">No alerts recorded for this project.</div>';
+      stack.innerHTML = '<div class="empty-state"><strong>No alerts recorded</strong><span>Alerts for the selected project will appear here.</span></div>';
       return;
     }
 
@@ -416,7 +533,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const sampleAlerts = (alerts && alerts.length > 0) ? alerts : [];
 
     if (sampleAlerts.length === 0) {
-      alertsTbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#A1A1AA;">No alerts recorded for project ${currentProject}.</td></tr>`;
+      alertsTbody.innerHTML = `<tr><td colspan="6" class="empty-table-state">No alerts recorded for the selected project.</td></tr>`;
     } else {
       alertsTbody.innerHTML = sampleAlerts.map((a, i) => `
         <tr>

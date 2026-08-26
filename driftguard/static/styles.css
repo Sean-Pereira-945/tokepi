@@ -953,11 +953,7 @@ input:disabled {
 }
 
 
-/* ==========================================================================
-   PHASE 1 FOUNDATIONAL DASHBOARD LAYER
-   Visual-only improvements: hierarchy, spacing, controls, responsive layout.
-   Keep this layer API- and behavior-neutral.
-   ========================================================================== */
+/* ==========================================================================\n   PHASE 1 FOUNDATIONAL DASHBOARD LAYER\n   Visual-only improvements: hierarchy, spacing, controls, responsive layout.\n   Keep this layer API- and behavior-neutral.\n   ========================================================================== */
 :root {
   --bg-pitch-black: #070b14;
   --bg-sidebar: #0b1120;
@@ -1652,5 +1648,313 @@ input:focus-visible {
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* ==========================================================================
+   PHASE 2 USABILITY STATES
+   Loading, empty, validation, and selection feedback.
+   ========================================================================== */
+.loading-indicator {
+  flex-basis: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.25rem;
+  color: #7dd3fc;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+}
+
+.loading-spinner {
+  width: 0.8rem;
+  height: 0.8rem;
+  display: inline-block;
+  border: 2px solid rgba(125, 211, 252, 0.25);
+  border-top-color: #7dd3fc;
+  border-radius: 50%;
+  animation: dashboard-spin 0.8s linear infinite;
+}
+
+@keyframes dashboard-spin {
+  to { transform: rotate(360deg); }
+}
+
+.field-hint {
+  max-width: 210px;
+  color: #64748b;
+  font-family: var(--font-sans);
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.empty-state strong {
+  color: #cbd5e1;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+}
+
+.empty-state span {
+  color: #64748b;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+}
+
+.empty-table-state {
+  padding: 2rem 1rem !important;
+  color: #94a3b8 !important;
+  text-align: center;
+  font-family: var(--font-sans) !important;
+}
+
+button:disabled {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+@media (max-width: 600px) {
+  .loading-indicator {
+    order: 5;
+  }
+
+  .field-hint {
+    max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation: none;
+  }
+}
+
+
+.loading-indicator[hidden] {
+  display: none;
+}
+
+
+/* ==========================================================================\n   PROFESSIONAL DASHBOARD STRUCTURE\n   Layout-only layer: preserve existing IDs, controls, and data behavior.\n   ========================================================================== */
+:root {
+  --content-max-width: 1480px;
+  --section-gap: 1.75rem;
+  --panel-gap: 1.15rem;
+}
+
+.main-content {
+  max-width: var(--content-max-width);
+  margin-right: auto;
+}
+
+.page-header {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.75fr) minmax(520px, 1.45fr);
+  grid-template-areas:
+    "title controls"
+    "loading loading"
+    "status status";
+  align-items: start;
+  column-gap: 2.5rem;
+  row-gap: 0.45rem;
+  padding: 1.5rem 1.6rem 1.25rem;
+}
+
+.page-header .header-title {
+  grid-area: title;
+  min-width: 0;
+}
+
+.page-header .header-controls {
+  grid-area: controls;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.context-controls,
+.action-controls {
+  display: grid;
+  align-items: end;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.context-controls {
+  grid-template-columns: minmax(0, 1.45fr) minmax(140px, 0.65fr);
+}
+
+.action-controls {
+  grid-template-columns: minmax(190px, 1fr) auto auto;
+}
+
+.action-controls .api-key-control {
+  min-width: 0;
+}
+
+.action-controls .api-key-input,
+.action-controls .field-hint {
+  width: 100%;
+  max-width: none;
+}
+
+.page-header > .loading-indicator {
+  grid-area: loading;
+  margin-top: 0.15rem;
+}
+
+.page-header > .dashboard-status {
+  grid-area: status;
+  min-height: 1.1rem;
+  margin-top: 0.15rem;
+}
+
+.dashboard-section {
+  margin-top: var(--section-gap);
+}
+
+.dashboard-section:first-child {
+  margin-top: 0;
+}
+
+.section-kicker {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.8rem;
+  color: #7dd3fc;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.section-kicker::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(103, 232, 249, 0.3), transparent 70%);
+}
+
+.summary-section .metrics-grid,
+.analytics-section .grid-2col,
+.operations-section .grid-2col {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.grid-2col {
+  align-items: stretch;
+  gap: var(--panel-gap);
+}
+
+.grid-2col > .panel {
+  min-width: 0;
+  height: 100%;
+}
+
+.analytics-section .grid-2col > .panel {
+  min-height: 365px;
+}
+
+.operations-section .grid-2col > .panel {
+  min-height: 300px;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  flex: 0 0 auto;
+}
+
+.chart-box {
+  flex: 1 1 auto;
+  min-height: 260px;
+}
+
+.operations-section .alerts-stack,
+.operations-section .mitigation-grid {
+  flex: 1 1 auto;
+}
+
+.diagnosis-section .agent-diagnosis-panel {
+  margin-top: 0;
+}
+
+.diagnosis-section .diagnosis-message {
+  max-width: 76ch;
+}
+
+@media (max-width: 1100px) {
+  .page-header {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "title"
+      "controls"
+      "loading"
+      "status";
+    column-gap: 0;
+  }
+
+  .page-header .header-controls {
+    width: 100%;
+  }
+
+  .action-controls {
+    grid-template-columns: minmax(180px, 1fr) auto auto;
+  }
+}
+
+@media (max-width: 700px) {
+  .page-header {
+    padding: 1.15rem;
+  }
+
+  .context-controls,
+  .action-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .action-controls .api-key-control {
+    grid-column: 1 / -1;
+  }
+
+  .action-controls button {
+    width: 100%;
+  }
+
+  .analytics-section .grid-2col > .panel,
+  .operations-section .grid-2col > .panel {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .context-controls,
+  .action-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .action-controls .api-key-control {
+    grid-column: auto;
+  }
+
+  .section-kicker {
+    font-size: 0.6rem;
+    letter-spacing: 0.12em;
   }
 }
