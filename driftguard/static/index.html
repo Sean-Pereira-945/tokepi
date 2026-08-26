@@ -61,7 +61,7 @@
     <main class="main-content">
       
       <!-- Top Header Bar with Styled Dropdowns & Essential Buttons -->
-      <header class="top-header page-header">
+      <div class="top-header page-header">
         <div class="header-title">
           <h1 id="page-title">Operational Overview</h1>
           <p class="subtitle">Real-time AI Health, Retrieval Quality & Cost Optimization</p>
@@ -82,12 +82,43 @@
 
           <!-- Styled Environment Dropdown -->
           <div class="dropdown-wrapper">
-            <label for="env-select">ENV</label>
+            <label for="env-select">ENVIRONMENT</label>
             <div class="select-container">
               <select id="env-select" class="styled-dropdown">
+                <option value="all">All environments</option>
                 <option value="prod">prod</option>
                 <option value="staging">staging</option>
                 <option value="dev">dev</option>
+                <option value="test">test</option>
+              </select>
+              <span class="select-arrow">▼</span>
+            </div>
+          </div>
+
+          <!-- Dashboard Window and Severity Filters -->
+          <div class="dropdown-wrapper">
+            <label for="time-range-select">WINDOW</label>
+            <div class="select-container">
+              <select id="time-range-select" class="styled-dropdown">
+                <option value="15m">Last 15 minutes</option>
+                <option value="1h">Last hour</option>
+                <option value="24h" selected>Last 24 hours</option>
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
+                <option value="all">All time</option>
+              </select>
+              <span class="select-arrow">▼</span>
+            </div>
+          </div>
+
+          <div class="dropdown-wrapper">
+            <label for="severity-select">ALERTS</label>
+            <div class="select-container">
+              <select id="severity-select" class="styled-dropdown">
+                <option value="all">All severities</option>
+                <option value="critical">Critical only</option>
+                <option value="warning">Warnings only</option>
+                <option value="stable">Stable only</option>
               </select>
               <span class="select-arrow">▼</span>
             </div>
@@ -119,6 +150,10 @@
           Loading dashboard data…
         </div>
         <div id="dashboard-status" class="dashboard-status" role="status" aria-live="polite"></div>
+        <div class="dashboard-meta-row" aria-live="polite">
+          <span id="dashboard-filter-summary">Window: Last 24 hours · Environment: All · Alerts: All</span>
+          <span id="dashboard-last-updated">Last updated: Not yet</span>
+        </div>
       </header>
 
       <!-- TAB 1: OVERVIEW -->
@@ -136,14 +171,14 @@
               <span class="card-title">TOTAL TELEMETRY EVENTS</span>
             </div>
             <div class="card-number" id="metric-total-events">0</div>
-            <div class="card-sub text-green">● Real-time monitored</div>
+            <div class="card-sub text-green" id="metric-events-meta">● Filtered project events</div>
           </div>
 
           <!-- Card 2: Saved Tokens -->
           <div class="metric-card anime-card">
             <div class="card-top">
               <div class="icon-square green-glow">SAVED</div>
-              <span class="card-title">SAVED TOKENS / COST</span>
+              <span class="card-title">SAVED TOKENS</span>
             </div>
             <div class="card-number" id="metric-saved-tokens">0</div>
             <div class="card-sub text-blue" id="metric-saved-cost">$0.00 saved</div>
@@ -166,7 +201,7 @@
               <span class="card-title">MEAN RETRIEVAL SCORE</span>
             </div>
             <div class="card-number" id="metric-retrieval-score">0.00</div>
-            <div class="card-sub text-green">Threshold: 0.50 floor</div>
+            <div class="card-sub text-green" id="metric-retrieval-meta">Active policy floor: 0.50</div>
           </div>
 
         </div>
