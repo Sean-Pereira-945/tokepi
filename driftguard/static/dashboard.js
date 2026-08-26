@@ -5,7 +5,12 @@ document.addEventListener('DOMContentLoaded', () => {
   let qualityScatterChart = null;
 
   let currentProject = 'antigravity-live';
-  let currentEnv = 'prod';
+  const envSelect = document.getElementById('env-select');
+  const timeRangeSelect = document.getElementById('time-range-select');
+  const severitySelect = document.getElementById('severity-select');
+  let currentEnv = envSelect?.value || 'all';
+  let currentTimeRange = timeRangeSelect?.value || '24h';
+  let currentSeverity = severitySelect?.value || 'all';
   let isLoadingDashboard = false;
   const apiKeyInput = document.getElementById('dashboard-api-key');
   if (apiKeyInput) apiKeyInput.value = window.localStorage.getItem('driftguard_api_key') || '';
@@ -13,6 +18,20 @@ document.addEventListener('DOMContentLoaded', () => {
   function requestHeaders() {
     const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
     return apiKey ? { 'X-API-Key': apiKey } : {};
+  }
+
+  function dashboardQuery(includeSeverity = true) {
+    const params = new URLSearchParams();
+    if (currentEnv && currentEnv !== 'all') params.set('environment', currentEnv);
+    if (includeSeverity && currentSeverity && currentSeverity !== 'all') {
+      params.set('severity', currentSeverity);
+    }
+    params.set('time_range', currentTimeRange || 'all');
+    return params.toString();
+  }
+
+  function withDashboardQuery(path, includeSeverity = true) {
+    return `${path}?${dashboardQuery(includeSeverity)}`;
   }
 
   const projectModal = document.getElementById('project-modal');
@@ -224,7 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
         context_length: parseFloat(document.getElementById('input-context-length').value),
         retrieval_score: parseFloat(document.getElementById('input-retrieval-score').value),
         response_quality: parseFloat(document.getElementById('input-response-quality').value),
-        environment: currentEnv
+        environment: currentEnv === 'all' ? null : currentEnv
       };
 
       try {
@@ -355,10 +374,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  const envSelect = document.getElementById('env-select');
   if (envSelect) {
     envSelect.addEventListener('change', (e) => {
       currentEnv = e.target.value;
+      loadDashboardData();
+    });
+  }
+
+  if (timeRangeSelect) {
+    timeRangeSelect.addEventListener('change', (e) => {
+      currentTimeRange = e.target.value;
+      loadDashboardData();
+    });
+  }
+
+  if (severitySelect) {
+    severitySelect.addEventListener('change', (e) => {
+      currentSeverity = e.target.value;
       loadDashboardData();
     });
   }
@@ -390,6 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAlertsTable([]);
     renderCharts([]);
     renderAgentDiagnosis(null);
+    updateDashboardMeta(null);
     const diagnosisMessage = document.getElementById('diagnosis-message');
     if (diagnosisMessage) diagnosisMessage.textContent = message;
   }
@@ -405,15 +438,17 @@ document.addEventListener('DOMContentLoaded', () => {
     setStatus('Loading dashboard data…');
     try {
       const responses = await Promise.all([
-        fetch(`/projects/${currentProject}/summary`, { headers: requestHeaders() }),
-        fetch(`/events/${currentProject}`, { headers: requestHeaders() }),
-        fetch(`/alerts/${currentProject}`, { headers: requestHeaders() }),
-        fetch(`/projects/${currentProject}/agent-diagnosis`, { headers: requestHeaders() })
+        fetch(withDashboardQuery(`/projects/${currentProject}/summary`), { headers: requestHeaders() }),
+        fetch(withDashboardQuery(`/projects/${currentProject}/metrics`), { headers: requestHeaders() }),
+        fetch(withDashboardQuery(`/events/${currentProject}`, false), { headers: requestHeaders() }),
+        fetch(withDashboardQuery(`/alerts/${currentProject}`), { headers: requestHeaders() }),
+        fetch(withDashboardQuery(`/projects/${currentProject}/agent-diagnosis`, false), { headers: requestHeaders() })
       ]);
 
-      const [summaryRes, eventsRes, alertsRes, diagnosisRes] = responses;
+      const [summaryRes, metricsRes, eventsRes, alertsRes, diagnosisRes] = responses;
       for (const [response, label] of [
         [summaryRes, 'Dashboard summary unavailable'],
+        [metricsRes, 'Dashboard metrics unavailable'],
         [eventsRes, 'Telemetry unavailable'],
         [alertsRes, 'Alerts unavailable'],
         [diagnosisRes, 'Agent diagnosis unavailable']
@@ -421,10 +456,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!response.ok) throw new Error(await responseError(response, label));
       }
 
-      const [summary, events, alerts, diagnosis] = await Promise.all(
+      const [summary, metrics, events, alerts, diagnosis] = await Promise.all(
         responses.map(response => response.json())
       );
-      updateMetrics(summary, events, alerts);
+      updateMetrics(summary, events, alerts, metrics);
+      updateDashboardMeta(metrics);
       renderRecentAlerts(alerts);
       renderAlertsTable(alerts);
       renderCharts(events);
@@ -470,16 +506,18 @@ document.addEventListener('DOMContentLoaded', () => {
     recommendation.textContent = diagnosis.recommendation || '';
   }
 
-  function updateMetrics(summary, events, alerts) {
-    const totalEvents = events ? events.length : 0;
-    const totalSavedTokens = alerts ? alerts.reduce((acc, a) => acc + (a.saved_tokens || 0), 0) : 0;
-    const activeAlerts = alerts ? alerts.length : 0;
-    const criticalAlerts = alerts ? alerts.filter(a => a.severity === 'critical' || a.severity === 'warning').length : 0;
+  function updateMetrics(summary, events, alerts, metrics) {
+    const aggregate = metrics || summary?.aggregates || {};
+    const totalEvents = aggregate.total_events ?? (events ? events.length : 0);
+    const totalSavedTokens = aggregate.saved_tokens ?? (alerts ? alerts.reduce((acc, a) => acc + (a.saved_tokens || 0), 0) : 0);
+    const activeAlerts = aggregate.alert_count ?? (alerts ? alerts.length : 0);
+    const criticalAlerts = aggregate.critical_count ?? (alerts ? alerts.filter(a => a.severity === 'critical').length : 0);
+    const warningAlerts = aggregate.warning_count ?? (alerts ? alerts.filter(a => a.severity === 'warning').length : 0);
 
-    let avgRetrieval = 0;
-    if (events && events.length > 0) {
-      const sum = events.reduce((acc, e) => acc + (e.retrieval_score || 0), 0);
-      avgRetrieval = sum / events.length;
+    let avgRetrieval = aggregate.retrieval_score ?? 0;
+    if (aggregate.retrieval_score == null && events && events.length > 0) {
+      const scores = events.filter(e => e.retrieval_score != null).map(e => Number(e.retrieval_score));
+      avgRetrieval = scores.length ? scores.reduce((acc, value) => acc + value, 0) / scores.length : 0;
     }
 
     const totalEvtEl = document.getElementById('metric-total-events');
@@ -489,14 +527,46 @@ document.addEventListener('DOMContentLoaded', () => {
     const critAltEl = document.getElementById('metric-critical-alerts');
     const retValEl = document.getElementById('metric-retrieval-score');
     const alertBadgeEl = document.getElementById('alert-count-badge');
+    const eventsMetaEl = document.getElementById('metric-events-meta');
+    const retrievalMetaEl = document.getElementById('metric-retrieval-meta');
 
-    if (totalEvtEl) totalEvtEl.textContent = totalEvents.toLocaleString();
-    if (savedTokEl) savedTokEl.textContent = totalSavedTokens >= 1000000 ? `${(totalSavedTokens / 1000000).toFixed(1)}M` : totalSavedTokens.toLocaleString();
-    if (savedCostEl) savedCostEl.textContent = `+$${(totalSavedTokens * 0.00002).toFixed(2)} saved`;
+    if (totalEvtEl) totalEvtEl.textContent = Number(totalEvents).toLocaleString();
+    if (savedTokEl) savedTokEl.textContent = totalSavedTokens >= 1000000 ? `${(totalSavedTokens / 1000000).toFixed(1)}M` : Number(totalSavedTokens).toLocaleString();
+    if (savedCostEl) savedCostEl.textContent = `Token savings: ${Number(totalSavedTokens).toLocaleString()}`;
     if (activeAltEl) activeAltEl.textContent = activeAlerts;
-    if (critAltEl) critAltEl.textContent = `${criticalAlerts} critical requiring action`;
-    if (retValEl) retValEl.textContent = avgRetrieval.toFixed(2);
+    if (critAltEl) {
+      critAltEl.textContent = currentSeverity === 'critical'
+        ? `${criticalAlerts} critical requiring action`
+        : currentSeverity === 'warning'
+          ? `${warningAlerts} warnings in view`
+          : `${criticalAlerts} critical · ${warningAlerts} warnings`;
+    }
+    if (retValEl) retValEl.textContent = avgRetrieval == null ? '—' : Number(avgRetrieval).toFixed(2);
     if (alertBadgeEl) alertBadgeEl.textContent = activeAlerts;
+    if (eventsMetaEl) eventsMetaEl.textContent = `${currentTimeRange} · ${currentEnv === 'all' ? 'all environments' : currentEnv}`;
+    if (retrievalMetaEl && summary?.environment) retrievalMetaEl.textContent = `Environment: ${summary.environment}`;
+  }
+
+  function updateDashboardMeta(metrics) {
+    const timeRangeLabels = {
+      '15m': 'Last 15 minutes',
+      '1h': 'Last hour',
+      '24h': 'Last 24 hours',
+      '7d': 'Last 7 days',
+      '30d': 'Last 30 days',
+      all: 'All time'
+    };
+    const filterSummary = document.getElementById('dashboard-filter-summary');
+    const lastUpdated = document.getElementById('dashboard-last-updated');
+    const environmentLabel = currentEnv === 'all' ? 'All' : currentEnv;
+    const severityLabel = currentSeverity === 'all' ? 'All' : currentSeverity;
+    if (filterSummary) {
+      filterSummary.textContent = `Window: ${timeRangeLabels[currentTimeRange] || currentTimeRange} · Environment: ${environmentLabel} · Alerts: ${severityLabel}`;
+    }
+    if (lastUpdated) {
+      const timestamp = metrics?.last_updated;
+      lastUpdated.textContent = timestamp ? `Last updated: ${timestamp} UTC` : 'Last updated: No telemetry yet';
+    }
   }
 
   function renderRecentAlerts(alerts) {
@@ -539,10 +609,10 @@ document.addEventListener('DOMContentLoaded', () => {
         <tr>
           <td style="font-family: var(--font-mono); color:#A1A1AA;">alt_${i + 1}</td>
           <td><span style="color: #FFFFFF; font-weight: 800;">${a.severity.toUpperCase()}</span></td>
-          <td>${currentProject} (${currentEnv})</td>
+          <td>${currentProject} (${a.environment || (currentEnv === 'all' ? 'all' : currentEnv)})</td>
           <td>${a.message}</td>
           <td style="font-weight: 800; color: #FFFFFF;">+${a.saved_tokens}</td>
-          <td style="font-family: var(--font-mono); color:#A1A1AA;">Live</td>
+          <td style="font-family: var(--font-mono); color:#A1A1AA;">${a.created_at || 'Live'}</td>
         </tr>
       `).join('');
     }
@@ -556,7 +626,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const realEvents = (events && events.length > 0) ? events : [];
     
-    const labels = realEvents.map((_, i) => `Event ${realEvents.length - i}`);
+    const labels = realEvents.map((event, i) => event.created_at ? new Date(event.created_at.replace(' ', 'T') + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : `Event ${realEvents.length - i}`);
     const tokenData = realEvents.map(e => e.prompt_tokens || 0);
     const retrievalData = realEvents.map(e => e.retrieval_score ?? null);
     const qualityData = realEvents.map(e => e.response_quality ?? null);

@@ -27,6 +27,23 @@ service = DriftGuardService(database_url=get_database_url())
 require_valid_api_key = build_api_key_dependency(service)
 
 _PROJECT_ID_RE = re.compile(r"^[a-zA-Z0-9\-_]{1,64}$")
+_ALLOWED_ENVIRONMENTS = {"prod", "staging", "dev", "test"}
+_ALLOWED_TIME_RANGES = {"15m", "1h", "24h", "7d", "30d", "all"}
+_ALLOWED_SEVERITIES = {"warning", "critical", "stable"}
+
+
+def validate_dashboard_filters(
+    environment: str | None = None,
+    severity: str | None = None,
+    time_range: str = "all",
+) -> tuple[str | None, str | None, str]:
+    if environment is not None and environment not in _ALLOWED_ENVIRONMENTS:
+        raise HTTPException(status_code=422, detail="environment must be one of prod, staging, dev, or test")
+    if severity is not None and severity not in _ALLOWED_SEVERITIES:
+        raise HTTPException(status_code=422, detail="severity must be warning, critical, or stable")
+    if time_range not in _ALLOWED_TIME_RANGES:
+        raise HTTPException(status_code=422, detail="time_range must be one of 15m, 1h, 24h, 7d, 30d, or all")
+    return environment, severity, time_range
 
 
 @app.get("/", response_class=HTMLResponse, response_model=None, dependencies=[Depends(rate_limit_default)])
@@ -137,12 +154,20 @@ class AlertCreateRequest(BaseModel):
     saved_tokens: float = 0.0
     project_id: str
     account_id: str | None = None
+    environment: str | None = None
 
     @field_validator("severity")
     @classmethod
     def valid_severity(cls, v: str) -> str:
         if v not in {"warning", "critical", "stable"}:
             raise ValueError("severity must be 'warning', 'critical', or 'stable'")
+        return v
+
+    @field_validator("environment")
+    @classmethod
+    def valid_alert_environment(cls, v: str | None) -> str | None:
+        if v is not None and v not in _ALLOWED_ENVIRONMENTS:
+            raise ValueError(f"environment must be one of {sorted(_ALLOWED_ENVIRONMENTS)}")
         return v
 
     @field_validator("saved_tokens")
@@ -377,32 +402,79 @@ def delete_project(
 @app.get("/projects/{project_id}/summary", dependencies=[Depends(rate_limit_default)])
 def get_project_summary(
     project_id: str,
+    environment: str | None = None,
+    severity: str | None = None,
+    time_range: str = "all",
     x_api_key: str | None = Header(default=None),
     account_id: str = Depends(require_account_from_token),
 ) -> dict[str, object]:
     project = resolve_project_access(project_id, account_id, x_api_key)
-
-    project_snapshot = build_project_snapshot(
-        project.project_id, project.alerts, environment=project.environment
+    environment, severity, time_range = validate_dashboard_filters(environment, severity, time_range)
+    filtered_alerts = service.list_alerts(
+        project_id,
+        severity=severity,
+        environment=environment,
+        time_range=time_range,
     )
-    dashboard_summary = build_dashboard_summary(project.project_id, project.alerts)
+    project_snapshot = build_project_snapshot(
+        project.project_id,
+        filtered_alerts,
+        environment=environment or project.environment,
+    )
+    dashboard_summary = build_dashboard_summary(project.project_id, filtered_alerts)
+    aggregates = service.get_dashboard_aggregates(
+        project_id,
+        environment=environment,
+        severity=severity,
+        time_range=time_range,
+    )
 
     payload = {
         **project_snapshot,
         **dashboard_summary,
-        "environment": project.environment,
+        "environment": environment or project.environment,
         "account_id": project.account_id,
         "project_id": project.project_id,
+        "aggregates": aggregates,
     }
     return payload
+
+
+@app.get("/projects/{project_id}/metrics", dependencies=[Depends(rate_limit_default)])
+def get_project_metrics(
+    project_id: str,
+    environment: str | None = None,
+    severity: str | None = None,
+    time_range: str = "all",
+    x_api_key: str | None = Header(default=None),
+    account_id: str = Depends(require_account_from_token),
+) -> dict[str, Any]:
+    """Return authoritative dashboard metrics for a filtered project window."""
+    resolve_project_access(project_id, account_id, x_api_key)
+    environment, severity, time_range = validate_dashboard_filters(environment, severity, time_range)
+    return service.get_dashboard_aggregates(
+        project_id,
+        environment=environment,
+        severity=severity,
+        time_range=time_range,
+    )
 
 
 @app.get("/projects/{project_id}/dashboard", dependencies=[Depends(rate_limit_default)])
 def get_project_dashboard_alias(
     project_id: str,
+    environment: str | None = None,
+    severity: str | None = None,
+    time_range: str = "all",
     account_id: str = Depends(require_account_from_token),
 ) -> dict[str, object]:
-    return get_project_summary(project_id, account_id=account_id)
+    return get_project_summary(
+        project_id,
+        environment=environment,
+        severity=severity,
+        time_range=time_range,
+        account_id=account_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +493,7 @@ def create_alert(
                 "severity": request.severity,
                 "message": request.message,
                 "saved_tokens": request.saved_tokens,
+                "environment": request.environment,
             },
             account_id=account_id,
         )
@@ -432,11 +505,20 @@ def create_alert(
 @app.get("/alerts/{project_id}", dependencies=[Depends(rate_limit_default)])
 def get_alerts_for_project(
     project_id: str,
+    environment: str | None = None,
+    severity: str | None = None,
+    time_range: str = "all",
     x_api_key: str | None = Header(default=None),
     account_id: str = Depends(require_account_from_token),
 ) -> list[dict[str, Any]]:
-    project = resolve_project_access(project_id, account_id, x_api_key)
-    return project.alerts
+    resolve_project_access(project_id, account_id, x_api_key)
+    environment, severity, time_range = validate_dashboard_filters(environment, severity, time_range)
+    return service.list_alerts(
+        project_id,
+        severity=severity,
+        environment=environment,
+        time_range=time_range,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -485,13 +567,21 @@ def ingest_dashboard_event(
 def list_events(
     project_id: str,
     limit: int = 100,
+    environment: str | None = None,
+    time_range: str = "all",
     x_api_key: str | None = Header(default=None),
     account_id: str = Depends(require_account_from_token),
 ) -> list[dict[str, Any]]:
     """Return recent telemetry events for a project (up to 100 most recent)."""
     resolve_project_access(project_id, account_id, x_api_key)
+    environment, _, time_range = validate_dashboard_filters(environment, None, time_range)
     clamped_limit = max(1, min(limit, 100))
-    return service.list_events(project_id, limit=clamped_limit)
+    return service.list_events(
+        project_id,
+        limit=clamped_limit,
+        environment=environment,
+        time_range=time_range,
+    )
 
 
 @app.post(
@@ -512,12 +602,15 @@ def ingest_agent_event(
 @app.get("/projects/{project_id}/agent-diagnosis", dependencies=[Depends(rate_limit_default)])
 def get_agent_diagnosis(
     project_id: str,
+    environment: str | None = None,
+    time_range: str = "all",
     x_api_key: str | None = Header(default=None),
     account_id: str = Depends(require_account_from_token),
 ) -> dict[str, Any]:
     """Analyze recent agent attempts and identify retry waste and blocked tools."""
     resolve_project_access(project_id, account_id, x_api_key)
-    events = service.list_agent_events(project_id)
+    environment, _, time_range = validate_dashboard_filters(environment, None, time_range)
+    events = service.list_agent_events(project_id, environment=environment, time_range=time_range)
     return analyze_agent_events(events)
 
 
