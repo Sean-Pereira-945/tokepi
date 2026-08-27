@@ -35,6 +35,9 @@
         <a href="#overview" class="nav-item active" data-tab="overview">
           Overview
         </a>
+        <a href="#events" class="nav-item" data-tab="events">
+          Event Explorer <span class="nav-badge" id="event-count-badge">0</span>
+        </a>
         <a href="#alerts" class="nav-item" data-tab="alerts">
           Alert Feed <span class="nav-badge" id="alert-count-badge">0</span>
         </a>
@@ -299,7 +302,10 @@
         <div class="panel anime-panel margin-top agent-diagnosis-panel">
           <div class="panel-header flex-between">
             <h2>Agent Task Diagnosis</h2>
-            <span id="agent-diagnosis-status" class="diagnosis-badge">NO DATA</span>
+            <div class="panel-header-actions">
+              <button id="open-diagnosis-btn" class="text-link-btn" type="button" disabled>View detail</button>
+              <span id="agent-diagnosis-status" class="diagnosis-badge">NO DATA</span>
+            </div>
           </div>
           <div class="diagnosis-grid">
             <div><span class="diagnosis-label">BLOCKING TOOL</span><strong id="diagnosis-tool">None</strong></div>
@@ -314,7 +320,53 @@
 
       </div>
 
-      <!-- TAB 2: ALERTS FEED -->
+      <!-- TAB 2: TELEMETRY EVENT EXPLORER -->
+      <div id="tab-events" class="tab-content">
+        <div class="panel anime-panel">
+          <div class="panel-header flex-between">
+            <div>
+              <h2>Telemetry Event Explorer</h2>
+              <p class="panel-desc">Inspect the most recent events in the selected dashboard window.</p>
+            </div>
+            <span id="event-explorer-count" class="explorer-count">0 events</span>
+          </div>
+          <div class="explorer-toolbar">
+            <label class="explorer-search">
+              <span>SEARCH EVENTS</span>
+              <input id="event-search-input" class="cyber-input" type="search" placeholder="Search environment, ID, or metric value" autocomplete="off" />
+            </label>
+            <label class="explorer-limit">
+              <span>ROWS</span>
+              <select id="event-limit-select" class="styled-dropdown">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+              </select>
+            </label>
+            <button id="clear-event-search-btn" class="anime-btn btn-secondary" type="button">Clear</button>
+          </div>
+          <div id="event-explorer-status" class="explorer-status" role="status" aria-live="polite"></div>
+          <div class="table-wrapper explorer-table-wrapper">
+            <table class="cyber-table explorer-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>TIMESTAMP</th>
+                  <th>ENVIRONMENT</th>
+                  <th>PROMPT TOKENS</th>
+                  <th>CONTEXT</th>
+                  <th>RETRIEVAL</th>
+                  <th>QUALITY</th>
+                  <th>ACTION</th>
+                </tr>
+              </thead>
+              <tbody id="events-explorer-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: ALERTS FEED -->
       <div id="tab-alerts" class="tab-content">
         <div class="panel anime-panel">
           <div class="panel-header">
@@ -340,7 +392,7 @@
         </div>
       </div>
 
-      <!-- TAB 3: DRIFT ANALYTICS -->
+      <!-- TAB 4: DRIFT ANALYTICS -->
       <div id="tab-analytics" class="tab-content">
         <div class="grid-2col">
           <div class="panel anime-panel">
@@ -359,7 +411,7 @@
         </div>
       </div>
 
-      <!-- TAB 4: MITIGATION RULES -->
+      <!-- TAB 5: MITIGATION RULES -->
       <div id="tab-policy" class="tab-content">
         <div class="panel anime-panel max-w-650">
           <div class="panel-header">
@@ -396,7 +448,7 @@
         </div>
       </div>
 
-      <!-- TAB 5: SDK QUICKSTART -->
+      <!-- TAB 6: SDK QUICKSTART -->
       <div id="tab-quickstart" class="tab-content">
         <div class="panel anime-panel">
           <div class="panel-header">
@@ -470,6 +522,41 @@ client.sync_metrics(<span class="c-green">"antigravity-live"</span>)</code></pre
         </div>
         <div id="project-create-status" class="form-status"></div>
       </form>
+    </div>
+  </div>
+
+  <!-- Event Detail Modal -->
+  <div id="event-detail-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="event-detail-title">
+    <div class="panel modal-box detail-modal-box anime-panel">
+      <div class="panel-header flex-between">
+        <h2 id="event-detail-title">Telemetry Event Detail</h2>
+        <button id="close-event-detail-btn" class="close-x" type="button">Close</button>
+      </div>
+      <div id="event-detail-grid" class="detail-grid"></div>
+      <div class="detail-json-label">RAW EVENT SUMMARY</div>
+      <pre id="event-detail-json" class="detail-json"></pre>
+    </div>
+  </div>
+
+  <!-- Alert Detail Modal -->
+  <div id="alert-detail-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="alert-detail-title">
+    <div class="panel modal-box detail-modal-box anime-panel">
+      <div class="panel-header flex-between">
+        <h2 id="alert-detail-title">Alert Detail</h2>
+        <button id="close-alert-detail-btn" class="close-x" type="button">Close</button>
+      </div>
+      <div id="alert-detail-content" class="detail-content"></div>
+    </div>
+  </div>
+
+  <!-- Diagnosis Detail Modal -->
+  <div id="diagnosis-detail-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="diagnosis-detail-title">
+    <div class="panel modal-box detail-modal-box anime-panel">
+      <div class="panel-header flex-between">
+        <h2 id="diagnosis-detail-title">Agent Diagnosis Detail</h2>
+        <button id="close-diagnosis-detail-btn" class="close-x" type="button">Close</button>
+      </div>
+      <div id="diagnosis-detail-content" class="detail-content"></div>
     </div>
   </div>
 

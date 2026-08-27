@@ -12,6 +12,49 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentTimeRange = timeRangeSelect?.value || '24h';
   let currentSeverity = severitySelect?.value || 'all';
   let isLoadingDashboard = false;
+  let dashboardEvents = [];
+  let dashboardAlerts = [];
+  let dashboardDiagnosis = null;
+  let eventSearchTerm = '';
+  let eventDisplayLimit = 100;
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>\"']/g, character => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '\"': '&quot;',
+      "'": '&#039;'
+    })[character]);
+  }
+
+  function formatMetric(value, digits = 2) {
+    if (value === null || value === undefined || value === '') return '—';
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric.toLocaleString(undefined, { maximumFractionDigits: digits }) : '—';
+  }
+
+  function formatTimestamp(value) {
+    if (!value) return 'Unknown time';
+    const parsed = new Date(String(value).replace(' ', 'T') + (String(value).endsWith('Z') ? '' : 'Z'));
+    return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString([], {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    });
+  }
+
+  function showDetailModal(modalId) {
+    const modalElement = document.getElementById(modalId);
+    if (!modalElement) return;
+    modalElement.classList.remove('hidden');
+    const closeButton = modalElement.querySelector('.close-x');
+    if (closeButton) closeButton.focus();
+  }
+
+  function hideDetailModal(modalId) {
+    const modalElement = document.getElementById(modalId);
+    if (modalElement) modalElement.classList.add('hidden');
+  }
   const apiKeyInput = document.getElementById('dashboard-api-key');
   if (apiKeyInput) apiKeyInput.value = window.localStorage.getItem('driftguard_api_key') || '';
 
@@ -183,6 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const titles = {
       overview: 'Operational Overview',
       alerts: 'Complete Drift Alerts Feed',
+      events: 'Telemetry Event Explorer',
       analytics: 'Drift & Quality Analytics',
       policy: 'Mitigation Rules & Policies',
       quickstart: 'SDK Quickstart Integration'
@@ -417,9 +461,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load Main Telemetry & Dashboard Data
   // ---------------------------------------------------------------------------
   function renderEmptyDashboard(message = 'No telemetry recorded for this project.') {
+    dashboardEvents = [];
+    dashboardAlerts = [];
+    dashboardDiagnosis = null;
     updateMetrics(null, [], []);
     renderRecentAlerts([]);
     renderAlertsTable([]);
+    renderEventExplorer([]);
     renderCharts([]);
     renderAgentDiagnosis(null);
     updateDashboardMeta(null);
@@ -459,12 +507,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const [summary, metrics, events, alerts, diagnosis] = await Promise.all(
         responses.map(response => response.json())
       );
-      updateMetrics(summary, events, alerts, metrics);
+      dashboardEvents = events || [];
+      dashboardAlerts = alerts || [];
+      dashboardDiagnosis = diagnosis || null;
+      updateMetrics(summary, dashboardEvents, dashboardAlerts, metrics);
       updateDashboardMeta(metrics);
-      renderRecentAlerts(alerts);
-      renderAlertsTable(alerts);
-      renderCharts(events);
-      renderAgentDiagnosis(diagnosis);
+      renderRecentAlerts(dashboardAlerts);
+      renderAlertsTable(dashboardAlerts);
+      renderEventExplorer(dashboardEvents);
+      renderCharts(dashboardEvents);
+      renderAgentDiagnosis(dashboardDiagnosis);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Dashboard data unavailable. Please try again.';
       console.warn('Backend API fetching:', err);
@@ -493,11 +545,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (wastedTokens) wastedTokens.textContent = '0';
       if (message) message.textContent = 'No agent task diagnosis is available.';
       if (recommendation) recommendation.textContent = '';
+      const detailButton = document.getElementById('open-diagnosis-btn');
+      if (detailButton) detailButton.disabled = true;
       return;
     }
 
     status.textContent = diagnosis.status ? diagnosis.status.toUpperCase() : 'NO DATA';
     status.className = `diagnosis-badge diagnosis-${diagnosis.status || 'stable'}`;
+    const detailButton = document.getElementById('open-diagnosis-btn');
+    if (detailButton) detailButton.disabled = false;
     tool.textContent = diagnosis.blocking_tool || 'None';
     failures.textContent = diagnosis.failure_count ?? 0;
     retries.textContent = diagnosis.repeated_attempts ?? 0;
@@ -580,17 +636,18 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    stack.innerHTML = sampleAlerts.slice(0, 3).map(a => {
+    stack.innerHTML = sampleAlerts.slice(0, 3).map((a, index) => {
       const isWarning = a.severity === 'critical' || a.severity === 'warning';
       const icon = isWarning ? 'WARNING' : 'INFO';
       return `
         <div class="alert-item ${isWarning ? 'alert-warning' : ''}">
           <div class="alert-item-icon">${icon}</div>
           <div class="alert-item-body">
-            <div class="alert-item-title">${a.message}</div>
-            <div class="alert-item-sub">${a.sub || `Project: ${currentProject}`}</div>
+            <div class="alert-item-title">${escapeHtml(a.message)}</div>
+            <div class="alert-item-sub">${escapeHtml(a.sub || `Project: ${currentProject}`)}</div>
           </div>
-          <div class="alert-item-time">${a.time || 'Live'}</div>
+          <div class="alert-item-time">${escapeHtml(a.time || formatTimestamp(a.created_at))}</div>
+          <button class="table-action-btn" type="button" data-alert-index="${index}">Inspect</button>
         </div>
       `;
     }).join('');
@@ -603,20 +660,194 @@ document.addEventListener('DOMContentLoaded', () => {
     const sampleAlerts = (alerts && alerts.length > 0) ? alerts : [];
 
     if (sampleAlerts.length === 0) {
-      alertsTbody.innerHTML = `<tr><td colspan="6" class="empty-table-state">No alerts recorded for the selected project.</td></tr>`;
+      alertsTbody.innerHTML = `<tr><td colspan="7" class="empty-table-state">No alerts recorded for the selected project.</td></tr>`;
     } else {
       alertsTbody.innerHTML = sampleAlerts.map((a, i) => `
         <tr>
           <td style="font-family: var(--font-mono); color:#A1A1AA;">alt_${i + 1}</td>
-          <td><span style="color: #FFFFFF; font-weight: 800;">${a.severity.toUpperCase()}</span></td>
-          <td>${currentProject} (${a.environment || (currentEnv === 'all' ? 'all' : currentEnv)})</td>
-          <td>${a.message}</td>
-          <td style="font-weight: 800; color: #FFFFFF;">+${a.saved_tokens}</td>
-          <td style="font-family: var(--font-mono); color:#A1A1AA;">${a.created_at || 'Live'}</td>
+          <td><span style="color: #FFFFFF; font-weight: 800;">${escapeHtml(String(a.severity || 'stable').toUpperCase())}</span></td>
+          <td>${escapeHtml(currentProject)} (${escapeHtml(a.environment || (currentEnv === 'all' ? 'all' : currentEnv))})</td>
+          <td>${escapeHtml(a.message)}</td>
+          <td style="font-weight: 800; color: #FFFFFF;">+${formatMetric(a.saved_tokens)}</td>
+          <td style="font-family: var(--font-mono); color:#A1A1AA;">${escapeHtml(formatTimestamp(a.created_at))}</td>
+          <td><button class="table-action-btn" type="button" data-alert-index="${i}">Inspect</button></td>
         </tr>
       `).join('');
     }
   }
+
+  function renderEventExplorer(events) {
+    const tbody = document.getElementById('events-explorer-tbody');
+    const count = document.getElementById('event-explorer-count');
+    const badge = document.getElementById('event-count-badge');
+    if (!tbody) return;
+
+    const sourceEvents = events || [];
+    const normalizedSearch = eventSearchTerm.trim().toLowerCase();
+    const matchingEvents = normalizedSearch
+      ? sourceEvents.filter(event => JSON.stringify(event).toLowerCase().includes(normalizedSearch))
+      : sourceEvents;
+    const visibleEvents = matchingEvents.slice(0, eventDisplayLimit);
+
+    if (count) count.textContent = `${matchingEvents.length} event${matchingEvents.length === 1 ? '' : 's'}`;
+    if (badge) badge.textContent = sourceEvents.length;
+
+    if (visibleEvents.length === 0) {
+      const message = sourceEvents.length === 0
+        ? 'No telemetry recorded for the selected project and filters.'
+        : 'No events match the current search.';
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-table-state">${escapeHtml(message)}</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = visibleEvents.map(event => `
+      <tr>
+        <td class="mono-cell">#${escapeHtml(event.id)}</td>
+        <td class="timestamp-cell">${escapeHtml(formatTimestamp(event.created_at))}</td>
+        <td><span class="environment-chip">${escapeHtml(event.environment || 'unknown')}</span></td>
+        <td>${formatMetric(event.prompt_tokens, 0)}</td>
+        <td>${formatMetric(event.context_length, 0)}</td>
+        <td>${formatMetric(event.retrieval_score)}</td>
+        <td>${formatMetric(event.response_quality)}</td>
+        <td><button class="table-action-btn" type="button" data-event-id="${escapeHtml(event.id)}">Inspect</button></td>
+      </tr>
+    `).join('');
+  }
+
+  function renderEventDetail(event) {
+    const grid = document.getElementById('event-detail-grid');
+    const json = document.getElementById('event-detail-json');
+    if (!grid || !json || !event) return;
+    const fields = [
+      ['Event ID', event.id],
+      ['Timestamp', formatTimestamp(event.created_at)],
+      ['Environment', event.environment || 'Unknown'],
+      ['Prompt tokens', formatMetric(event.prompt_tokens, 0)],
+      ['Context length', formatMetric(event.context_length, 0)],
+      ['Retrieval score', formatMetric(event.retrieval_score)],
+      ['Response quality', formatMetric(event.response_quality)]
+    ];
+    grid.innerHTML = fields.map(([label, value]) => `
+      <div class="detail-field"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
+    `).join('');
+    json.textContent = JSON.stringify(event, null, 2);
+    showDetailModal('event-detail-modal');
+  }
+
+  function renderAlertDetail(alert) {
+    const content = document.getElementById('alert-detail-content');
+    if (!content || !alert) return;
+    const severity = String(alert.severity || 'stable').toLowerCase();
+    content.innerHTML = `
+      <div class="detail-status-row"><span class="severity-chip severity-${escapeHtml(severity)}">${escapeHtml(severity)}</span><span class="timestamp-cell">${escapeHtml(formatTimestamp(alert.created_at))}</span></div>
+      <div class="detail-message">${escapeHtml(alert.message || 'No alert message available.')}</div>
+      <div class="detail-grid">
+        <div class="detail-field"><span>Project</span><strong>${escapeHtml(currentProject)}</strong></div>
+        <div class="detail-field"><span>Environment</span><strong>${escapeHtml(alert.environment || 'Unknown')}</strong></div>
+        <div class="detail-field"><span>Saved tokens</span><strong>${formatMetric(alert.saved_tokens, 0)}</strong></div>
+        <div class="detail-field"><span>Severity</span><strong>${escapeHtml(severity)}</strong></div>
+      </div>
+      <div class="detail-recommendation"><span>Investigation note</span><p>Inspect the related telemetry window and diagnosis before changing mitigation rules.</p></div>
+    `;
+    showDetailModal('alert-detail-modal');
+  }
+
+  function renderDiagnosisDetail(diagnosis) {
+    const content = document.getElementById('diagnosis-detail-content');
+    if (!content || !diagnosis) return;
+    content.innerHTML = `
+      <div class="detail-status-row"><span class="severity-chip severity-${escapeHtml(diagnosis.status || 'stable')}">${escapeHtml(String(diagnosis.status || 'stable').toUpperCase())}</span><span class="timestamp-cell">Filtered current window</span></div>
+      <div class="detail-grid">
+        <div class="detail-field"><span>Blocking tool</span><strong>${escapeHtml(diagnosis.blocking_tool || 'None')}</strong></div>
+        <div class="detail-field"><span>Failed attempts</span><strong>${formatMetric(diagnosis.failure_count, 0)}</strong></div>
+        <div class="detail-field"><span>Repeated attempts</span><strong>${formatMetric(diagnosis.repeated_attempts, 0)}</strong></div>
+        <div class="detail-field"><span>Wasted tokens</span><strong>${formatMetric(diagnosis.wasted_tokens, 0)}</strong></div>
+      </div>
+      <div class="detail-recommendation"><span>Diagnosis</span><p>${escapeHtml(diagnosis.diagnosis || 'No diagnosis available.')}</p><span>Recommendation</span><p>${escapeHtml(diagnosis.recommendation || 'Continue monitoring task and tool events.')}</p></div>
+    `;
+    showDetailModal('diagnosis-detail-modal');
+  }
+
+  const eventSearchInput = document.getElementById('event-search-input');
+  const eventLimitSelect = document.getElementById('event-limit-select');
+  const clearEventSearchBtn = document.getElementById('clear-event-search-btn');
+
+  if (eventSearchInput) {
+    eventSearchInput.addEventListener('input', event => {
+      eventSearchTerm = event.target.value;
+      renderEventExplorer(dashboardEvents);
+    });
+  }
+
+  if (eventLimitSelect) {
+    eventLimitSelect.addEventListener('change', event => {
+      eventDisplayLimit = Number(event.target.value) || 100;
+      renderEventExplorer(dashboardEvents);
+    });
+  }
+
+  if (clearEventSearchBtn) {
+    clearEventSearchBtn.addEventListener('click', () => {
+      eventSearchTerm = '';
+      if (eventSearchInput) eventSearchInput.value = '';
+      renderEventExplorer(dashboardEvents);
+      if (eventSearchInput) eventSearchInput.focus();
+    });
+  }
+
+  const eventsExplorerTbody = document.getElementById('events-explorer-tbody');
+  if (eventsExplorerTbody) {
+    eventsExplorerTbody.addEventListener('click', event => {
+      const button = event.target.closest('[data-event-id]');
+      if (!button) return;
+      const selectedEvent = dashboardEvents.find(item => String(item.id) === String(button.dataset.eventId));
+      renderEventDetail(selectedEvent);
+    });
+  }
+
+  const alertsTbody = document.getElementById('alerts-tbody');
+  if (alertsTbody) {
+    alertsTbody.addEventListener('click', event => {
+      const button = event.target.closest('[data-alert-index]');
+      if (!button) return;
+      renderAlertDetail(dashboardAlerts[Number(button.dataset.alertIndex)]);
+    });
+  }
+
+  const overviewAlerts = document.getElementById('overview-alerts-tbody');
+  if (overviewAlerts) {
+    overviewAlerts.addEventListener('click', event => {
+      const button = event.target.closest('[data-alert-index]');
+      if (!button) return;
+      renderAlertDetail(dashboardAlerts[Number(button.dataset.alertIndex)]);
+    });
+  }
+
+  const diagnosisButton = document.getElementById('open-diagnosis-btn');
+  if (diagnosisButton) diagnosisButton.addEventListener('click', () => renderDiagnosisDetail(dashboardDiagnosis));
+
+  [
+    ['close-event-detail-btn', 'event-detail-modal'],
+    ['close-alert-detail-btn', 'alert-detail-modal'],
+    ['close-diagnosis-detail-btn', 'diagnosis-detail-modal']
+  ].forEach(([buttonId, modalId]) => {
+    const button = document.getElementById(buttonId);
+    if (button) button.addEventListener('click', () => hideDetailModal(modalId));
+  });
+
+  ['event-detail-modal', 'alert-detail-modal', 'diagnosis-detail-modal'].forEach(modalId => {
+    const modalElement = document.getElementById(modalId);
+    if (modalElement) {
+      modalElement.addEventListener('click', event => {
+        if (event.target === modalElement) hideDetailModal(modalId);
+      });
+    }
+  });
+
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    ['event-detail-modal', 'alert-detail-modal', 'diagnosis-detail-modal'].forEach(hideDetailModal);
+  });
 
   function renderCharts(events) {
     const elTimeline = document.getElementById('timelineChart');
