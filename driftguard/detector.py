@@ -1,3 +1,5 @@
+"""Feature-distribution drift scoring utilities."""
+
 from __future__ import annotations
 
 import math
@@ -10,6 +12,7 @@ FEATURE_NAMES = ["feature_a", "feature_b", "feature_c"]
 
 
 def mean_abs_change(current: list[float], reference: list[float]) -> float:
+    """Return the mean absolute difference from the reference mean."""
     current_arr = np.asarray(current, dtype=float)
     reference_arr = np.asarray(reference, dtype=float)
     if reference_arr.size == 0:

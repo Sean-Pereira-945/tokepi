@@ -1,3 +1,5 @@
+"""Thread-aware SDK client for capturing, evaluating, and syncing telemetry."""
+
 from __future__ import annotations
 
 import threading
@@ -37,6 +39,7 @@ class DriftGuardClient:
         base_url: str | None = None,
         timeout: float = 10.0,
     ) -> None:
+        """Initialize local telemetry queues, backend settings, and policy defaults."""
         self.api_key = api_key
         self.project_name = project_name
         self.environment = environment

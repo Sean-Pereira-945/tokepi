@@ -1,3 +1,5 @@
+"""Persistence-backed service operations for accounts, projects, and telemetry."""
+
 from __future__ import annotations
 
 import os
@@ -20,6 +22,8 @@ DEFAULT_POLICY: dict[str, float] = {
 
 @dataclass
 class Account:
+    """An owning account and the projects associated with it."""
+
     account_id: str
     name: str
     projects: dict[str, "Project"] = field(default_factory=dict)
@@ -27,6 +31,8 @@ class Account:
 
 @dataclass
 class Project:
+    """A monitored project, its environment, credentials, and alert records."""
+
     project_id: str
     name: str
     environment: str = "prod"
@@ -39,6 +45,7 @@ class DriftGuardService:
     """SaaS service layer with account/project persistence and secure session binding."""
 
     def __init__(self, database_url: str | None = None) -> None:
+        """Open the configured database, create its schema, and load cached state."""
         self.database_url = database_url or get_database_url()
         self.db_path = self._resolve_db_path(self.database_url)
         self.accounts: dict[str, Account] = {}
@@ -54,6 +61,7 @@ class DriftGuardService:
     # ------------------------------------------------------------------
 
     def _resolve_db_path(self, database_url: str) -> str:
+        """Convert a SQLite URL into the filesystem path used by the driver."""
         if not database_url.startswith("sqlite://"):
             return database_url
         if database_url in {"sqlite:///:memory:", "sqlite://"}:
@@ -68,6 +76,7 @@ class DriftGuardService:
         return path
 
     def _ensure_parent_directory(self) -> None:
+        """Create the local database directory when the selected backend needs one."""
         if (
             self.database_url.startswith("postgresql")
             or self.database_url.startswith("postgres")
@@ -79,6 +88,7 @@ class DriftGuardService:
             os.makedirs(directory, exist_ok=True)
 
     def _connect(self) -> None:
+        """Connect to PostgreSQL when available, otherwise use SQLite."""
         if self.database_url.startswith("postgresql") or self.database_url.startswith("postgres"):
             try:
                 import psycopg2
@@ -97,6 +107,7 @@ class DriftGuardService:
         self.is_postgres = False
 
     def _initialize_db(self) -> None:
+        """Create current tables and apply lightweight migrations for old databases."""
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS accounts (
@@ -208,6 +219,7 @@ class DriftGuardService:
         self.conn.commit()
 
     def _load_state(self) -> None:
+        """Hydrate in-memory account, project, session, and alert objects from storage."""
         self.accounts = {}
         self.projects = {}
         self.sessions = {}
@@ -257,6 +269,7 @@ class DriftGuardService:
     # ------------------------------------------------------------------
 
     def create_account(self, account_id: str, name: str) -> Account:
+        """Persist and cache an account, replacing an existing record with the same ID."""
         self.conn.execute(
             "INSERT OR REPLACE INTO accounts (account_id, name) VALUES (?, ?)",
             (account_id, name),
@@ -285,6 +298,7 @@ class DriftGuardService:
             self.projects.pop(pid, None)
 
     def get_account(self, account_id: str) -> Account:
+        """Return a cached account or load it from the database."""
         account = self.accounts.get(account_id)
         if account is None:
             row = self.conn.execute(
@@ -301,6 +315,7 @@ class DriftGuardService:
     # ------------------------------------------------------------------
 
     def create_session(self, account_id: str) -> str:
+        """Create and persist a random session token for an existing account."""
         if account_id not in self.accounts and account_id not in self.conn.execute(
             "SELECT account_id FROM accounts WHERE account_id = ?",
             (account_id,),
@@ -316,6 +331,7 @@ class DriftGuardService:
         return token
 
     def get_account_for_session(self, token: str) -> str:
+        """Resolve a session token to its owning account identifier."""
         account_id = self.sessions.get(token)
         if account_id is None:
             row = self.conn.execute(
@@ -338,6 +354,7 @@ class DriftGuardService:
         environment: str = "prod",
         account_id: str = "default",
     ) -> Project:
+        """Create a project, generate its API key, and seed its default policy."""
         if account_id not in self.accounts:
             self.create_account(account_id, account_id)
 
@@ -378,6 +395,7 @@ class DriftGuardService:
         return project
 
     def get_project(self, project_id: str, account_id: str | None = None) -> Project:
+        """Load a project and optionally enforce that it belongs to an account."""
         row = self.conn.execute(
             "SELECT project_id, name, environment, account_id, api_key FROM projects WHERE project_id = ?",
             (project_id,),
@@ -414,6 +432,7 @@ class DriftGuardService:
         return project
 
     def list_projects(self, account_id: str | None = None) -> list[Project]:
+        """List all projects or only those owned by the requested account."""
         if account_id is None:
             rows = self.conn.execute(
                 "SELECT project_id, name, environment, account_id, api_key FROM projects"
@@ -441,6 +460,7 @@ class DriftGuardService:
             account.projects.pop(project_id, None)
 
     def _delete_project_data(self, project_id: str) -> None:
+        """Remove a project's dependent alerts, events, and policy rows."""
         self.conn.execute("DELETE FROM alerts WHERE project_id = ?", (project_id,))
         self.conn.execute("DELETE FROM events WHERE project_id = ?", (project_id,))
         self.conn.execute("DELETE FROM policies WHERE project_id = ?", (project_id,))
@@ -461,6 +481,7 @@ class DriftGuardService:
     def add_alert(
         self, project_id: str, alert: dict[str, Any], account_id: str | None = None
     ) -> dict[str, Any]:
+        """Persist an alert and append the normalized record to its project cache."""
         project = self.get_project(project_id, account_id=account_id)
         alert_environment = alert.get("environment") or project.environment
         self.conn.execute(
@@ -521,6 +542,7 @@ class DriftGuardService:
         return {"project_id": project_id, "status": "ingested"}
 
     def _parse_created_at(self, value: str | None) -> datetime | None:
+        """Parse an ISO timestamp and normalize naive values to UTC."""
         if not value:
             return None
         try:
@@ -530,6 +552,7 @@ class DriftGuardService:
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
     def _within_time_range(self, created_at: str | None, time_range: str = "all") -> bool:
+        """Return whether a timestamp falls inside the requested relative window."""
         if time_range == "all":
             return True
         durations = {

@@ -1,3 +1,5 @@
+"""Formatting helpers for presenting benchmark results as research output."""
+
 from __future__ import annotations
 
 from typing import Any

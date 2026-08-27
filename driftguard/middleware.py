@@ -1,3 +1,5 @@
+"""FastAPI dependencies for request throttling and project API-key auth."""
+
 from __future__ import annotations
 
 import time
@@ -18,12 +20,14 @@ class _SlidingWindowCounter:
     """Thread-safe sliding-window rate limiter bucket."""
 
     def __init__(self, limit: int, window_seconds: int = 60) -> None:
+        """Initialize a counter with a request limit and rolling time window."""
         self.limit = limit
         self.window = window_seconds
         # map of ip → deque of request timestamps
         self._hits: dict[str, deque[float]] = defaultdict(deque)
 
     def is_allowed(self, key: str) -> bool:
+        """Record a request and report whether the key remains within its limit."""
         now = time.monotonic()
         cutoff = now - self.window
         dq = self._hits[key]
@@ -39,6 +43,7 @@ class _SlidingWindowCounter:
         return True
 
     def remaining(self, key: str) -> int:
+        """Return the number of requests still available for a key."""
         now = time.monotonic()
         cutoff = now - self.window
         dq = self._hits[key]
@@ -52,6 +57,7 @@ _ingestion_limiter = _SlidingWindowCounter(limit=120, window_seconds=60)
 
 
 def _client_key(request: Request) -> str:
+    """Extract the connecting client address used as the limiter key."""
     return request.client.host if request.client else "unknown"
 
 
@@ -85,6 +91,7 @@ def build_api_key_dependency(service: DriftGuardService):
     """Returns a FastAPI dependency that validates X-API-Key and returns the project_id."""
 
     def require_valid_api_key(x_api_key: str | None = Header(default=None)) -> str:
+        """Validate the request key and return its owning project identifier."""
         if x_api_key is None:
             raise HTTPException(status_code=401, detail="Missing X-API-Key header")
         try:

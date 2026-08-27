@@ -1,3 +1,5 @@
+"""Dashboard summary payload builders for alert collections."""
+
 from __future__ import annotations
 
 from typing import Any

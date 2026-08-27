@@ -1,3 +1,5 @@
+"""Analysis helpers for failed, repeated, and token-wasting agent attempts."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -5,6 +7,7 @@ from typing import Any
 
 
 def _event_tokens(event: dict[str, Any]) -> float:
+    """Calculate an event's token total, preferring an explicit total."""
     total_tokens = event.get("total_tokens")
     if total_tokens is not None:
         return float(total_tokens)

@@ -1,3 +1,5 @@
+"""Synthetic telemetry data models and generators used by demos and benchmarks."""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -8,6 +10,8 @@ import numpy as np
 
 @dataclass
 class DriftSample:
+    """One synthetic observation with features and its known drift label."""
+
     timestamp: int
     feature_a: float
     feature_b: float

@@ -1,3 +1,4 @@
+// Dashboard controller: loads project telemetry and renders the interactive views.
 document.addEventListener('DOMContentLoaded', () => {
   let timelineChart = null;
   let driftRadarChart = null;
