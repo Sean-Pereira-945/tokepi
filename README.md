@@ -171,7 +171,7 @@ MCP gateway, or wrapper emits telemetry. GitHub Copilot is not automatically
 observable from this repository because its private agent session and tool events
 are not exposed to DriftGuard.
 
-See **[setup_on_agent.md](setup_on_agent.md)** for the current adapter contract,
+See **[setup_on_agent.md](docs/setup_on_agent.md)** for the current adapter contract,
 the supported telemetry foundation, and the event schema required for full retry
 and tool-failure diagnosis.
 
@@ -187,8 +187,9 @@ and tool-failure diagnosis.
 * `driftguard/middleware.py`: Rate limiting dependencies and API key authentication.
 * `driftguard/api.py`: Hosted SaaS Dashboard UI launcher and dynamic HTML/CSS templates.
 * `driftguard/detector.py`: Core mathematical drift scoring engine.
-* `setup_on_agent.md`: Comprehensive Antigravity coding agent integration guide.
-* `QUICKSTART.md`: Developer onboarding walkthrough.
+* `docs/setup_on_agent.md`: Comprehensive Antigravity coding agent integration guide.
+* `docs/QUICKSTART.md`: Developer onboarding walkthrough.
+* `docs/explainability.md`: Explanation of dashboard terms and metrics.
 
 ---
 

@@ -18,8 +18,10 @@ The project is now in a launch-ready telemetry foundation stage:
 - mitigation and token-saving recommendations are implemented
 - benchmark and experiment workflow exists
 - reporting output is available for research or product summaries
-- tests pass for the current functionality
+- tests pass for the current functionality (including the new dashboard metrics validation suite)
 - project API-key isolation and live dashboard data are implemented
+- dashboard connected to metrics and filtering APIs (environment, severity, time range)
+- complete backend codebase docstring documentation added
 - first agent task/tool/retry diagnosis slice is implemented; provider and IDE adapters are not
 - agent wrappers, MCP gateway integrations, and VS Code/Copilot event integrations are not implemented
 
@@ -28,8 +30,9 @@ The project is now in a launch-ready telemetry foundation stage:
 ### Core product
 - `driftguard/client.py` — developer SDK for telemetry capture and drift detection
 - `driftguard/mitigation.py` — mitigation recommendation engine and token-savings logic
-- `driftguard/routes.py` — FastAPI backend, project API keys, ingestion, and dashboard data routes
-- `driftguard/static/` — live dashboard assets
+- `driftguard/routes.py` — FastAPI backend, project API keys, ingestion, and dashboard data/filtering routes
+- `driftguard/service.py` — persistent database service logic
+- `driftguard/static/` — live dashboard assets (with interactive filtering and explorer workflows)
 
 ### Research and validation layer
 - `driftguard/data.py` — synthetic dataset generation and drift modeling
@@ -38,11 +41,17 @@ The project is now in a launch-ready telemetry foundation stage:
 - `driftguard/experiment.py` — reproducible experiment runner
 - `driftguard/reporting.py` — markdown and summary generation for results
 
-### Supporting docs and configuration
-- `README.md` — product overview and launch context
-- `requirements.txt` — package dependencies
-- `pyproject.toml` — project metadata and build configuration
-- `tests/` — implementation validation suite
+### Supporting docs and configuration (in `docs/`)
+- `README.md` (root) — product overview and launch context
+- `requirements.txt` (root) — package dependencies
+- `pyproject.toml` (root) — project metadata and build configuration
+- `tests/` — implementation validation suite (including dashboard metrics tests)
+- `docs/PROJECT_HANDOFF.md` — handoff document and roadmap
+- `docs/QUICKSTART.md` — developer onboarding and quickstart guide
+- `docs/explainability.md` — dashboard metrics and terms overview
+- `docs/setup_on_agent.md` — coding agent adapter integration guide
+- `docs/architecture_and_design.md` — system architecture details
+- `docs/phases.md` — development roadmap phases
 
 ## 4. Product architecture
 
