@@ -1,3 +1,5 @@
+"""Synthetic benchmark metrics for comparing drift detectors."""
+
 from __future__ import annotations
 
 from typing import Any

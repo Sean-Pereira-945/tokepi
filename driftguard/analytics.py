@@ -1,3 +1,5 @@
+"""Project-level alert aggregation used by the hosted dashboard."""
+
 from __future__ import annotations
 
 from typing import Any

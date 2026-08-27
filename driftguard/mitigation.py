@@ -1,3 +1,5 @@
+"""Rule-based recommendations for reducing prompt and response drift costs."""
+
 from __future__ import annotations
 
 from typing import Any

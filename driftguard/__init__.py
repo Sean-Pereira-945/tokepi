@@ -1,3 +1,5 @@
+"""Public package exports for the DriftGuard SDK and detection helpers."""
+
 from .client import DriftGuardClient
 from .detector import compute_drift_scores
 from .mitigation import recommend_mitigation

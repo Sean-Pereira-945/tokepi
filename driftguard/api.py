@@ -1,3 +1,5 @@
+"""Small demo FastAPI application exposing generated data and drift scores."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -21,11 +23,13 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    """Report that the demo API is available."""
     return {"status": "ok", "service": "driftguard"}
 
 
 @app.get("/dataset")
 def get_dataset() -> dict[str, Any]:
+    """Return a sample dataset, baseline summary, and preview rows."""
     samples = build_demo_dataset()
     summary = compute_baseline_summary(samples)
     return {"count": len(samples), "summary": summary, "samples": samples[:12]}
@@ -33,6 +37,7 @@ def get_dataset() -> dict[str, Any]:
 
 @app.get("/drift")
 def get_drift() -> dict[str, Any]:
+    """Generate demo samples and return their current drift assessment."""
     samples = build_demo_dataset()
     drift = compute_drift_scores(samples)
     return {
@@ -44,6 +49,7 @@ def get_drift() -> dict[str, Any]:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> str:
+    """Render the embedded demo dashboard page."""
     return """
     <!doctype html>
     <html lang="en">

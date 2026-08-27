@@ -1,3 +1,5 @@
+"""Experiment entry points that run individual or complete benchmark suites."""
+
 from __future__ import annotations
 
 from typing import Any

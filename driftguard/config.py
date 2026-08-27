@@ -1,3 +1,5 @@
+"""Environment-backed configuration helpers used by the service and API."""
+
 from __future__ import annotations
 
 import os

@@ -1,3 +1,5 @@
+"""FastAPI routes for project management, telemetry ingestion, and dashboards."""
+
 from __future__ import annotations
 
 import re
@@ -37,6 +39,7 @@ def validate_dashboard_filters(
     severity: str | None = None,
     time_range: str = "all",
 ) -> tuple[str | None, str | None, str]:
+    """Validate dashboard filter values and return them unchanged."""
     if environment is not None and environment not in _ALLOWED_ENVIRONMENTS:
         raise HTTPException(status_code=422, detail="environment must be one of prod, staging, dev, or test")
     if severity is not None and severity not in _ALLOWED_SEVERITIES:
@@ -48,6 +51,7 @@ def validate_dashboard_filters(
 
 @app.get("/", response_class=HTMLResponse, response_model=None, dependencies=[Depends(rate_limit_default)])
 def get_dashboard() -> Any:
+    """Serve the static dashboard or a minimal operational fallback page."""
     index_file = static_dir / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
@@ -61,6 +65,7 @@ def get_dashboard() -> Any:
 # ---------------------------------------------------------------------------
 
 def require_account_from_token(authorization: str | None = Header(default=None)) -> str:
+    """Resolve a bearer token to an account, using the default account when absent."""
     if authorization is None:
         if "default" not in service.accounts:
             service.create_account("default", "Default account")
@@ -101,11 +106,13 @@ def resolve_project_access(
 # ---------------------------------------------------------------------------
 
 class AccountCreateRequest(BaseModel):
+    """Validate the name submitted when registering an account."""
     name: str
 
     @field_validator("name")
     @classmethod
     def name_not_empty(cls, v: str) -> str:
+        """Trim and require a bounded, non-empty account name."""
         v = v.strip()
         if not v:
             raise ValueError("name must not be empty")
@@ -115,6 +122,7 @@ class AccountCreateRequest(BaseModel):
 
 
 class ProjectCreateRequest(BaseModel):
+    """Validate project identity, display name, and deployment environment."""
     project_id: str
     name: str
     environment: str = "prod"
@@ -123,6 +131,7 @@ class ProjectCreateRequest(BaseModel):
     @field_validator("project_id")
     @classmethod
     def valid_project_id(cls, v: str) -> str:
+        """Require a project ID made from URL-safe identifier characters."""
         if not _PROJECT_ID_RE.match(v):
             raise ValueError(
                 "project_id must be 1–64 alphanumeric characters, hyphens, or underscores"
@@ -132,6 +141,7 @@ class ProjectCreateRequest(BaseModel):
     @field_validator("name")
     @classmethod
     def name_not_empty(cls, v: str) -> str:
+        """Trim and require a bounded, non-empty project name."""
         v = v.strip()
         if not v:
             raise ValueError("name must not be empty")
@@ -142,6 +152,7 @@ class ProjectCreateRequest(BaseModel):
     @field_validator("environment")
     @classmethod
     def valid_environment(cls, v: str) -> str:
+        """Restrict a project to one of the supported deployment environments."""
         allowed = {"prod", "staging", "dev", "test"}
         if v not in allowed:
             raise ValueError(f"environment must be one of {sorted(allowed)}")
@@ -149,6 +160,7 @@ class ProjectCreateRequest(BaseModel):
 
 
 class AlertCreateRequest(BaseModel):
+    """Validate an alert submitted for a project."""
     severity: str
     message: str
     saved_tokens: float = 0.0
@@ -159,6 +171,7 @@ class AlertCreateRequest(BaseModel):
     @field_validator("severity")
     @classmethod
     def valid_severity(cls, v: str) -> str:
+        """Restrict alert severity to the supported dashboard categories."""
         if v not in {"warning", "critical", "stable"}:
             raise ValueError("severity must be 'warning', 'critical', or 'stable'")
         return v
@@ -166,6 +179,7 @@ class AlertCreateRequest(BaseModel):
     @field_validator("environment")
     @classmethod
     def valid_alert_environment(cls, v: str | None) -> str | None:
+        """Validate an optional environment attached to an alert."""
         if v is not None and v not in _ALLOWED_ENVIRONMENTS:
             raise ValueError(f"environment must be one of {sorted(_ALLOWED_ENVIRONMENTS)}")
         return v
@@ -173,6 +187,7 @@ class AlertCreateRequest(BaseModel):
     @field_validator("saved_tokens")
     @classmethod
     def non_negative_tokens(cls, v: float) -> float:
+        """Reject negative token-savings values."""
         if v < 0:
             raise ValueError("saved_tokens must be >= 0.0")
         return v
@@ -180,6 +195,7 @@ class AlertCreateRequest(BaseModel):
     @field_validator("message")
     @classmethod
     def message_not_empty(cls, v: str) -> str:
+        """Trim and require a non-empty alert message."""
         v = v.strip()
         if not v:
             raise ValueError("message must not be empty")
@@ -187,6 +203,7 @@ class AlertCreateRequest(BaseModel):
 
 
 class EventIngestRequest(BaseModel):
+    """Validate scalar telemetry values accepted from SDK or dashboard clients."""
     prompt_tokens: float | None = None
     retrieval_score: float | None = None
     context_length: float | None = None
@@ -196,6 +213,7 @@ class EventIngestRequest(BaseModel):
     @field_validator("retrieval_score", "response_quality")
     @classmethod
     def score_in_range(cls, v: float | None) -> float | None:
+        """Keep quality and retrieval scores within the inclusive unit interval."""
         if v is not None and not (0.0 <= v <= 1.0):
             raise ValueError("Score values must be between 0.0 and 1.0")
         return v
@@ -203,12 +221,14 @@ class EventIngestRequest(BaseModel):
     @field_validator("prompt_tokens", "context_length")
     @classmethod
     def non_negative(cls, v: float | None) -> float | None:
+        """Reject negative token and context measurements."""
         if v is not None and v < 0:
             raise ValueError("Value must be >= 0")
         return v
 
 
 class AgentEventIngestRequest(BaseModel):
+    """Validate one agent task or tool attempt submitted for diagnosis."""
     task_id: str
     trace_id: str | None = None
     agent_name: str | None = None
@@ -228,6 +248,7 @@ class AgentEventIngestRequest(BaseModel):
     @field_validator("task_id", "tool_name", "status")
     @classmethod
     def required_text(cls, v: str) -> str:
+        """Trim required text fields and reject empty values."""
         value = v.strip()
         if not value:
             raise ValueError("value must not be empty")
@@ -236,6 +257,7 @@ class AgentEventIngestRequest(BaseModel):
     @field_validator("attempt")
     @classmethod
     def positive_attempt(cls, v: int) -> int:
+        """Require attempt numbering to start at one."""
         if v < 1:
             raise ValueError("attempt must be >= 1")
         return v
@@ -243,11 +265,13 @@ class AgentEventIngestRequest(BaseModel):
     @field_validator("prompt_tokens", "completion_tokens", "total_tokens", "duration_ms")
     @classmethod
     def non_negative_agent_values(cls, v: float | None) -> float | None:
+        """Reject negative token, duration, and usage measurements."""
         if v is not None and v < 0:
             raise ValueError("value must be >= 0")
         return v
 
 class PolicyUpdateRequest(BaseModel):
+    """Validate optional updates to a project's drift thresholds."""
     prompt_token_limit: float | None = None
     retrieval_score_floor: float | None = None
     context_length_limit: float | None = None
@@ -256,6 +280,7 @@ class PolicyUpdateRequest(BaseModel):
     @field_validator("retrieval_score_floor", "response_quality_floor")
     @classmethod
     def floor_in_range(cls, v: float | None) -> float | None:
+        """Keep score floors within the inclusive unit interval."""
         if v is not None and not (0.0 <= v <= 1.0):
             raise ValueError("Floor values must be between 0.0 and 1.0")
         return v
@@ -263,6 +288,7 @@ class PolicyUpdateRequest(BaseModel):
     @field_validator("prompt_token_limit", "context_length_limit")
     @classmethod
     def limit_positive(cls, v: float | None) -> float | None:
+        """Require positive token and context limits."""
         if v is not None and v <= 0:
             raise ValueError("Limit values must be > 0")
         return v
@@ -274,6 +300,7 @@ class PolicyUpdateRequest(BaseModel):
 
 @app.get("/health", dependencies=[Depends(rate_limit_default)])
 def health() -> dict[str, str]:
+    """Report the status and version of the SaaS API."""
     return {"status": "ok", "service": "driftguard-saas", "version": "0.3.0"}
 
 
@@ -330,6 +357,7 @@ def create_project(
     request: ProjectCreateRequest,
     account_id: str = Depends(require_account_from_token),
 ) -> dict[str, str]:
+    """Create a project for the authenticated account and return its API key."""
     project = service.create_project(
         request.project_id,
         request.name,
@@ -350,6 +378,7 @@ def list_projects(
     x_api_key: str | None = Header(default=None),
     account_id: str = Depends(require_account_from_token),
 ) -> list[dict[str, str]]:
+    """List projects visible through the session or supplied project API key."""
     if x_api_key:
         try:
             projects = [service.get_project_by_api_key(x_api_key)]
@@ -373,6 +402,7 @@ def get_project(
     project_id: str,
     account_id: str = Depends(require_account_from_token),
 ) -> dict[str, object]:
+    """Return project metadata and its stored alerts."""
     try:
         project = service.get_project(project_id, account_id=account_id)
     except KeyError as exc:
@@ -392,6 +422,7 @@ def delete_project(
     project_id: str,
     account_id: str = Depends(require_account_from_token),
 ) -> dict[str, str]:
+    """Delete a project after verifying ownership."""
     try:
         service.delete_project(project_id, account_id=account_id)
     except KeyError as exc:
@@ -408,6 +439,7 @@ def get_project_summary(
     x_api_key: str | None = Header(default=None),
     account_id: str = Depends(require_account_from_token),
 ) -> dict[str, object]:
+    """Build the combined project, dashboard, and aggregate summary payload."""
     project = resolve_project_access(project_id, account_id, x_api_key)
     environment, severity, time_range = validate_dashboard_filters(environment, severity, time_range)
     filtered_alerts = service.list_alerts(
@@ -468,6 +500,7 @@ def get_project_dashboard_alias(
     time_range: str = "all",
     account_id: str = Depends(require_account_from_token),
 ) -> dict[str, object]:
+    """Provide the dashboard route as an alias of the project summary route."""
     return get_project_summary(
         project_id,
         environment=environment,
@@ -486,6 +519,7 @@ def create_alert(
     request: AlertCreateRequest,
     account_id: str = Depends(require_account_from_token),
 ) -> dict[str, object]:
+    """Persist a validated project alert for the authenticated account."""
     try:
         alert = service.add_alert(
             request.project_id,
@@ -511,6 +545,7 @@ def get_alerts_for_project(
     x_api_key: str | None = Header(default=None),
     account_id: str = Depends(require_account_from_token),
 ) -> list[dict[str, Any]]:
+    """Return filtered alerts for a project accessible to the caller."""
     resolve_project_access(project_id, account_id, x_api_key)
     environment, severity, time_range = validate_dashboard_filters(environment, severity, time_range)
     return service.list_alerts(
@@ -558,6 +593,7 @@ def ingest_dashboard_event(
     x_api_key: str | None = Header(default=None),
     account_id: str = Depends(require_account_from_token),
 ) -> dict[str, Any]:
+    """Ingest a telemetry event from an authenticated dashboard user."""
     """Ingest a test event from the authenticated dashboard."""
     resolve_project_access(project_id, account_id, x_api_key)
     return service.ingest_event(project_id, request.model_dump(exclude_none=True))
