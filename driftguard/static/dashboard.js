@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let dashboardDiagnosis = null;
   let eventSearchTerm = '';
   let eventDisplayLimit = 100;
+  let detailModalReturnFocus = null;
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>\"']/g, character => ({
@@ -47,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function showDetailModal(modalId) {
     const modalElement = document.getElementById(modalId);
     if (!modalElement) return;
+    detailModalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     modalElement.classList.remove('hidden');
     const closeButton = modalElement.querySelector('.close-x');
     if (closeButton) closeButton.focus();
@@ -54,7 +56,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function hideDetailModal(modalId) {
     const modalElement = document.getElementById(modalId);
-    if (modalElement) modalElement.classList.add('hidden');
+    if (!modalElement) return;
+    modalElement.classList.add('hidden');
+    if (detailModalReturnFocus && document.contains(detailModalReturnFocus)) {
+      detailModalReturnFocus.focus();
+    }
+    detailModalReturnFocus = null;
+  }
+
+  function populateProjectSelect(select, projects, emptyLabel) {
+    if (!select) return;
+    select.replaceChildren();
+    if (!projects.length) {
+      const emptyOption = document.createElement('option');
+      emptyOption.value = '';
+      emptyOption.textContent = emptyLabel;
+      select.appendChild(emptyOption);
+      select.value = '';
+      return;
+    }
+
+    projects.forEach(project => {
+      const option = document.createElement('option');
+      option.value = project.project_id;
+      option.textContent = `${project.name} (${project.project_id})`;
+      select.appendChild(option);
+    });
   }
   const apiKeyInput = document.getElementById('dashboard-api-key');
   if (apiKeyInput) apiKeyInput.value = window.localStorage.getItem('driftguard_api_key') || '';
@@ -209,19 +236,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.switchTab = (tabId) => {
     navItems.forEach(item => {
-      if (item.dataset.tab === tabId) {
-        item.classList.add('active');
+      const isActive = item.dataset.tab === tabId;
+      item.classList.toggle('active', isActive);
+      item.setAttribute('aria-selected', String(isActive));
+      if (isActive) {
+        item.setAttribute('aria-current', 'page');
       } else {
-        item.classList.remove('active');
+        item.removeAttribute('aria-current');
       }
     });
 
     tabContents.forEach(tab => {
-      if (tab.id === `tab-${tabId}`) {
-        tab.classList.add('active');
-      } else {
-        tab.classList.remove('active');
-      }
+      const isActive = tab.id === `tab-${tabId}`;
+      tab.classList.toggle('active', isActive);
+      tab.setAttribute('aria-hidden', String(!isActive));
     });
 
     const titles = {
@@ -372,26 +400,19 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) throw new Error(await responseError(res, 'Project list unavailable'));
       const projects = await res.json();
       if (projects && projects.length > 0) {
-        if (select) {
-          select.innerHTML = projects.map(p =>
-            `<option value="${p.project_id}">${p.name} (${p.project_id})</option>`
-          ).join('');
-        }
+        populateProjectSelect(select, projects, 'No projects available');
 
         const found = projects.find(p => p.project_id === 'antigravity-live');
         currentProject = found ? found.project_id : projects[0].project_id;
         if (select) select.value = currentProject;
       } else {
         currentProject = '';
-        if (select) {
-          select.innerHTML = '<option value="">No projects available</option>';
-          select.value = '';
-        }
+        populateProjectSelect(select, [], 'No projects available');
         setStatus('No projects found. Create a project to begin.', false);
       }
     } catch (err) {
       currentProject = '';
-      if (select) select.innerHTML = '<option value="">Unable to load projects</option>';
+      populateProjectSelect(select, [], 'Unable to load projects');
       const message = err instanceof Error ? err.message : 'Unable to load projects.';
       console.warn('Failed to fetch projects list:', err);
       setStatus(message, true);
@@ -692,6 +713,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (count) count.textContent = `${matchingEvents.length} event${matchingEvents.length === 1 ? '' : 's'}`;
     if (badge) badge.textContent = sourceEvents.length;
+    const explorerStatus = document.getElementById('event-explorer-status');
+    if (explorerStatus) {
+      explorerStatus.textContent = normalizedSearch
+        ? `Search matched ${matchingEvents.length} of ${sourceEvents.length} loaded events.`
+        : `Showing ${visibleEvents.length} of ${sourceEvents.length} loaded events.`;
+    }
 
     if (visibleEvents.length === 0) {
       const message = sourceEvents.length === 0
@@ -846,8 +873,28 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
-    ['event-detail-modal', 'alert-detail-modal', 'diagnosis-detail-modal'].forEach(hideDetailModal);
+    const openModal = ['event-detail-modal', 'alert-detail-modal', 'diagnosis-detail-modal']
+      .map(modalId => document.getElementById(modalId))
+      .find(modalElement => modalElement && !modalElement.classList.contains('hidden'));
+
+    if (event.key === 'Escape') {
+      ['event-detail-modal', 'alert-detail-modal', 'diagnosis-detail-modal'].forEach(hideDetailModal);
+      return;
+    }
+
+    if (event.key !== 'Tab' || !openModal) return;
+    const focusable = [...openModal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+      .filter(element => !element.disabled && element.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
 
   function renderCharts(events) {
@@ -1025,6 +1072,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Initial load
+  switchTab('overview');
   loadProjects().then(() => {
     loadDashboardData();
     animateCards();

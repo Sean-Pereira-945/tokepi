@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DriftGuard — AI Observability & Drift Protection</title>
   <meta name="description" content="Real-time AI application observability, prompt drift detection, root cause analysis, and token cost protection." />
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Grotesk:wght@600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
@@ -13,6 +14,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/premium.css" />
 </head>
 <body>
   <div class="app-layout">
@@ -33,22 +35,22 @@
       </div>
 
       <nav class="nav-menu">
-        <a href="#overview" class="nav-item active" data-tab="overview">
+        <a href="#overview" class="nav-item active" data-tab="overview" role="tab" aria-controls="tab-overview" aria-current="page">
           Overview
         </a>
-        <a href="#events" class="nav-item" data-tab="events">
+        <a href="#events" class="nav-item" data-tab="events" role="tab" aria-controls="tab-events">
           Event Explorer <span class="nav-badge" id="event-count-badge">0</span>
         </a>
-        <a href="#alerts" class="nav-item" data-tab="alerts">
+        <a href="#alerts" class="nav-item" data-tab="alerts" role="tab" aria-controls="tab-alerts">
           Alert Feed <span class="nav-badge" id="alert-count-badge">0</span>
         </a>
-        <a href="#analytics" class="nav-item" data-tab="analytics">
+        <a href="#analytics" class="nav-item" data-tab="analytics" role="tab" aria-controls="tab-analytics">
           Drift Analytics
         </a>
-        <a href="#policy" class="nav-item" data-tab="policy">
+        <a href="#policy" class="nav-item" data-tab="policy" role="tab" aria-controls="tab-policy">
           Mitigation Rules
         </a>
-        <a href="#quickstart" class="nav-item" data-tab="quickstart">
+        <a href="#quickstart" class="nav-item" data-tab="quickstart" role="tab" aria-controls="tab-quickstart">
           SDK Integration
         </a>
       </nav>
@@ -69,6 +71,10 @@
         <div class="header-title">
           <h1 id="page-title">Operational Overview</h1>
           <p class="subtitle">Real-time AI Health, Retrieval Quality & Cost Optimization</p>
+          <div class="header-context" aria-label="Dashboard status">
+            <span class="mode-badge"><span class="mode-dot" aria-hidden="true"></span>Live monitoring</span>
+            <span class="context-note">Refresh on demand</span>
+          </div>
         </div>
 
         <div class="header-controls">
@@ -140,11 +146,11 @@
           <button id="create-project-btn" class="anime-btn btn-secondary" type="button">Create Project</button>
 
           <!-- Functional Buttons -->
-          <button id="refresh-btn" class="anime-btn btn-blue">
+          <button id="refresh-btn" class="anime-btn btn-blue" type="button">
             Refresh
           </button>
 
-          <button id="simulate-event-btn" class="anime-btn btn-green">
+          <button id="simulate-event-btn" class="anime-btn btn-green" type="button">
             Test Telemetry
           </button>
           </div>
@@ -161,7 +167,7 @@
       </header>
 
       <!-- TAB 1: OVERVIEW -->
-      <div id="tab-overview" class="tab-content active">
+      <div id="tab-overview" class="tab-content active" role="tabpanel" tabindex="-1" aria-label="Operational Overview">
         
         <section class="dashboard-section summary-section" aria-labelledby="summary-section-title">
           <div id="summary-section-title" class="section-kicker">HEALTH SUMMARY</div>
@@ -322,7 +328,7 @@
       </div>
 
       <!-- TAB 2: TELEMETRY EVENT EXPLORER -->
-      <div id="tab-events" class="tab-content">
+      <div id="tab-events" class="tab-content" role="tabpanel" tabindex="-1" aria-label="Telemetry Event Explorer">
         <div class="panel anime-panel">
           <div class="panel-header flex-between">
             <div>
@@ -368,7 +374,7 @@
       </div>
 
       <!-- TAB 3: ALERTS FEED -->
-      <div id="tab-alerts" class="tab-content">
+      <div id="tab-alerts" class="tab-content" role="tabpanel" tabindex="-1" aria-label="Complete Drift Alerts Feed">
         <div class="panel anime-panel">
           <div class="panel-header">
             <h2>Complete Drift Alerts Feed</h2>
@@ -394,7 +400,7 @@
       </div>
 
       <!-- TAB 4: DRIFT ANALYTICS -->
-      <div id="tab-analytics" class="tab-content">
+      <div id="tab-analytics" class="tab-content" role="tabpanel" tabindex="-1" aria-label="Drift and Quality Analytics">
         <div class="grid-2col">
           <div class="panel anime-panel">
             <h2 class="panel-header">Context Length Distribution</h2>
@@ -413,7 +419,7 @@
       </div>
 
       <!-- TAB 5: MITIGATION RULES -->
-      <div id="tab-policy" class="tab-content">
+      <div id="tab-policy" class="tab-content" role="tabpanel" tabindex="-1" aria-label="Mitigation Rules and Policies">
         <div class="panel anime-panel max-w-650">
           <div class="panel-header">
             <h2>Configure Drift Thresholds</h2>
@@ -450,7 +456,7 @@
       </div>
 
       <!-- TAB 6: SDK QUICKSTART -->
-      <div id="tab-quickstart" class="tab-content">
+      <div id="tab-quickstart" class="tab-content" role="tabpanel" tabindex="-1" aria-label="SDK Quickstart Integration">
         <div class="panel anime-panel">
           <div class="panel-header">
             <h2>Connect Any LLM Provider</h2>
