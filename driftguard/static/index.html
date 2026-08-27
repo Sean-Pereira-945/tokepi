@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DriftGuard — AI Observability & Drift Protection</title>
   <meta name="description" content="Real-time AI application observability, prompt drift detection, root cause analysis, and token cost protection." />
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Grotesk:wght@600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
@@ -12,6 +13,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/premium.css" />
 </head>
 <body>
   <div class="app-layout">
@@ -68,6 +70,10 @@
         <div class="header-title">
           <h1 id="page-title">Operational Overview</h1>
           <p class="subtitle">Real-time AI Health, Retrieval Quality & Cost Optimization</p>
+          <div class="header-context" aria-label="Dashboard status">
+            <span class="mode-badge"><span class="mode-dot" aria-hidden="true"></span>Live monitoring</span>
+            <span class="context-note">Refresh on demand</span>
+          </div>
         </div>
 
         <div class="header-controls">

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">DriftGuard</title>
+  <desc id="desc">DriftGuard shield mark</desc>
+  <defs>
+    <linearGradient id="bg" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15335a" />
+      <stop offset="1" stop-color="#081322" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#bg)" />
+  <path d="M32 8 13 18v11c0 12.1 8.3 22.7 19 27 10.7-4.3 19-14.9 19-27V18L32 8Z" fill="none" stroke="#7dd3fc" stroke-width="4" stroke-linejoin="round" />
+  <path d="M32 21v20M22 31h20" stroke="#a7f3d0" stroke-width="4" stroke-linecap="round" />
+</svg>
