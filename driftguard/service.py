@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from secrets import token_urlsafe
 from typing import Any
@@ -129,10 +130,19 @@ class DriftGuardService:
                 severity TEXT NOT NULL,
                 message TEXT NOT NULL,
                 saved_tokens REAL NOT NULL DEFAULT 0.0,
+                environment TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (project_id) REFERENCES projects(project_id)
             )
             """
         )
+        # Migrate prototype databases that predate alert metadata.
+        for column, definition in (("environment", "TEXT"), ("created_at", "TEXT")):
+            try:
+                self.conn.execute(f"ALTER TABLE alerts ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
+        self.conn.execute("UPDATE alerts SET created_at = datetime('now') WHERE created_at IS NULL")
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
@@ -229,7 +239,7 @@ class DriftGuardService:
         for project in self.projects.values():
             project.alerts = []
             for alert_row in self.conn.execute(
-                "SELECT severity, message, saved_tokens FROM alerts WHERE project_id = ? ORDER BY id ASC",
+                "SELECT severity, message, saved_tokens, environment, created_at FROM alerts WHERE project_id = ? ORDER BY id ASC",
                 (project.project_id,),
             ):
                 project.alerts.append(
@@ -237,6 +247,8 @@ class DriftGuardService:
                         "severity": alert_row["severity"],
                         "message": alert_row["message"],
                         "saved_tokens": float(alert_row["saved_tokens"]),
+                        "environment": alert_row["environment"],
+                        "created_at": alert_row["created_at"],
                     }
                 )
 
@@ -386,7 +398,7 @@ class DriftGuardService:
         if not project.alerts:
             project.alerts = []
             for alert_row in self.conn.execute(
-                "SELECT severity, message, saved_tokens FROM alerts WHERE project_id = ? ORDER BY id ASC",
+                "SELECT severity, message, saved_tokens, environment, created_at FROM alerts WHERE project_id = ? ORDER BY id ASC",
                 (project_id,),
             ):
                 project.alerts.append(
@@ -394,6 +406,8 @@ class DriftGuardService:
                         "severity": alert_row["severity"],
                         "message": alert_row["message"],
                         "saved_tokens": float(alert_row["saved_tokens"]),
+                        "environment": alert_row["environment"],
+                        "created_at": alert_row["created_at"],
                     }
                 )
         self.projects[project_id] = project
@@ -448,13 +462,15 @@ class DriftGuardService:
         self, project_id: str, alert: dict[str, Any], account_id: str | None = None
     ) -> dict[str, Any]:
         project = self.get_project(project_id, account_id=account_id)
+        alert_environment = alert.get("environment") or project.environment
         self.conn.execute(
-            "INSERT INTO alerts (project_id, severity, message, saved_tokens) VALUES (?, ?, ?, ?)",
+            "INSERT INTO alerts (project_id, severity, message, saved_tokens, environment) VALUES (?, ?, ?, ?, ?)",
             (
                 project_id,
                 alert["severity"],
                 alert["message"],
                 float(alert.get("saved_tokens", 0.0)),
+                alert_environment,
             ),
         )
         self.conn.commit()
@@ -462,6 +478,8 @@ class DriftGuardService:
             "severity": alert["severity"],
             "message": alert["message"],
             "saved_tokens": float(alert.get("saved_tokens", 0.0)),
+            "environment": alert_environment,
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         }
         project.alerts.append(alert_record)
         return alert_record
@@ -474,6 +492,8 @@ class DriftGuardService:
         """Store a raw SDK telemetry event for a project."""
         import json
 
+        project = self.get_project(project_id)
+        event_environment = event.get("environment") or project.environment
         known_keys = {
             "prompt_tokens",
             "retrieval_score",
@@ -493,25 +513,58 @@ class DriftGuardService:
                 event.get("retrieval_score"),
                 event.get("context_length"),
                 event.get("response_quality"),
-                event.get("environment"),
+                event_environment,
                 json.dumps(extra) if extra else None,
             ),
         )
         self.conn.commit()
         return {"project_id": project_id, "status": "ingested"}
 
-    def list_events(self, project_id: str, limit: int = 100) -> list[dict[str, Any]]:
-        """Return the most recent telemetry events for a project."""
+    def _parse_created_at(self, value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+    def _within_time_range(self, created_at: str | None, time_range: str = "all") -> bool:
+        if time_range == "all":
+            return True
+        durations = {
+            "15m": timedelta(minutes=15),
+            "1h": timedelta(hours=1),
+            "24h": timedelta(hours=24),
+            "7d": timedelta(days=7),
+            "30d": timedelta(days=30),
+        }
+        duration = durations.get(time_range)
+        parsed = self._parse_created_at(created_at)
+        return bool(duration and parsed and parsed >= datetime.now(timezone.utc) - duration)
+
+    def list_events(
+        self,
+        project_id: str,
+        limit: int = 100,
+        environment: str | None = None,
+        time_range: str = "all",
+    ) -> list[dict[str, Any]]:
+        """Return recent telemetry events after optional dashboard filters."""
         rows = self.conn.execute(
             """
             SELECT id, prompt_tokens, retrieval_score, context_length, response_quality, environment, extra_json, created_at
             FROM events WHERE project_id = ?
-            ORDER BY id DESC LIMIT ?
+            ORDER BY id DESC
             """,
-            (project_id, limit),
+            (project_id,),
         ).fetchall()
         events: list[dict[str, Any]] = []
         for row in rows:
+            if environment and row["environment"] != environment:
+                continue
+            if not self._within_time_range(row["created_at"], time_range):
+                continue
             events.append(
                 {
                     "id": row["id"],
@@ -524,6 +577,81 @@ class DriftGuardService:
                 }
             )
         return events
+
+    def list_alerts(
+        self,
+        project_id: str,
+        severity: str | None = None,
+        environment: str | None = None,
+        time_range: str = "all",
+    ) -> list[dict[str, Any]]:
+        """Return project alerts after optional dashboard filters."""
+        rows = self.conn.execute(
+            """
+            SELECT severity, message, saved_tokens, environment, created_at
+            FROM alerts WHERE project_id = ?
+            ORDER BY id DESC
+            """,
+            (project_id,),
+        ).fetchall()
+        alerts: list[dict[str, Any]] = []
+        for row in rows:
+            if severity and row["severity"] != severity:
+                continue
+            if environment and row["environment"] not in {None, environment}:
+                continue
+            if not self._within_time_range(row["created_at"], time_range):
+                continue
+            alerts.append(
+                {
+                    "severity": row["severity"],
+                    "message": row["message"],
+                    "saved_tokens": float(row["saved_tokens"]),
+                    "environment": row["environment"],
+                    "created_at": row["created_at"],
+                }
+            )
+        return alerts
+
+    def get_dashboard_aggregates(
+        self,
+        project_id: str,
+        environment: str | None = None,
+        severity: str | None = None,
+        time_range: str = "all",
+    ) -> dict[str, Any]:
+        """Return authoritative dashboard metrics for a filtered project window."""
+        events = self.list_events(project_id, limit=10_000, environment=environment, time_range=time_range)
+        alerts = self.list_alerts(
+            project_id,
+            severity=severity,
+            environment=environment,
+            time_range=time_range,
+        )
+        retrieval_scores = [float(e["retrieval_score"]) for e in events if e["retrieval_score"] is not None]
+        response_qualities = [float(e["response_quality"]) for e in events if e["response_quality"] is not None]
+        timestamps = [e["created_at"] for e in events if e.get("created_at")]
+        timestamps.extend(a["created_at"] for a in alerts if a.get("created_at"))
+        critical_count = sum(1 for alert in alerts if alert["severity"] == "critical")
+        warning_count = sum(1 for alert in alerts if alert["severity"] == "warning")
+        saved_tokens = round(sum(alert["saved_tokens"] for alert in alerts), 3)
+        return {
+            "total_events": len(events),
+            "alert_count": len(alerts),
+            "critical_count": critical_count,
+            "warning_count": warning_count,
+            "saved_tokens": saved_tokens,
+            "estimated_token_savings": saved_tokens,
+            "retrieval_score": round(sum(retrieval_scores) / len(retrieval_scores), 4) if retrieval_scores else None,
+            "response_quality": round(sum(response_qualities) / len(response_qualities), 4) if response_qualities else None,
+            "status": "critical" if critical_count else "warning" if warning_count else "stable",
+            "last_updated": max(timestamps) if timestamps else None,
+            "filters": {
+                "environment": environment or "all",
+                "severity": severity or "all",
+                "time_range": time_range,
+            },
+        }
 
     def ingest_agent_event(self, project_id: str, event: dict[str, Any]) -> dict[str, Any]:
         """Store one task/tool attempt for agent retry analysis."""
@@ -557,8 +685,14 @@ class DriftGuardService:
         self.conn.commit()
         return {"project_id": project_id, "status": "ingested"}
 
-    def list_agent_events(self, project_id: str, limit: int = 200) -> list[dict[str, Any]]:
-        """Return recent task/tool attempts for a project."""
+    def list_agent_events(
+        self,
+        project_id: str,
+        limit: int = 200,
+        environment: str | None = None,
+        time_range: str = "all",
+    ) -> list[dict[str, Any]]:
+        """Return recent task/tool attempts after optional dashboard filters."""
         rows = self.conn.execute(
             """
             SELECT task_id, trace_id, agent_name, model, tool_name, tool_call_id,
@@ -569,7 +703,16 @@ class DriftGuardService:
             """,
             (project_id, limit),
         ).fetchall()
-        return [dict(row) for row in rows]
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            if environment and row["environment"] != environment:
+                continue
+            if not self._within_time_range(row["created_at"], time_range):
+                continue
+            events.append(dict(row))
+            if len(events) >= max(1, limit):
+                break
+        return events
 
     # ------------------------------------------------------------------
     # Policy management
