@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://driftguard:supersecret@db:5432/driftguard_db
+      - REDIS_URL=redis://cache:6379/0
+      - JWT_SECRET=change-this-in-production-12345
+    depends_on:
+      - db
+      - cache
+    restart: always
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=driftguard
+      - POSTGRES_PASSWORD=supersecret
+      - POSTGRES_DB=driftguard_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
+
+  cache:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    restart: always
+
+volumes:
+  pgdata:
+  redisdata:

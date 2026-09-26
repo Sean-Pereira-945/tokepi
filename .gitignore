@@ -79,3 +79,8 @@ venv.bak/
 
 # Log files
 *.log
+
+# Frontend build source
+.frontend_source/
+
+

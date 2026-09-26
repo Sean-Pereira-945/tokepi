@@ -8,8 +8,12 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from secrets import token_urlsafe
 from typing import Any
+import jwt
 
 from .config import get_database_url
+
+JWT_SECRET = os.environ.get("JWT_SECRET", "super-secret-key-change-in-production")
+JWT_ALGORITHM = "HS256"
 
 # Default drift thresholds written to every newly created project policy
 DEFAULT_POLICY: dict[str, float] = {
@@ -92,8 +96,33 @@ class DriftGuardService:
         if self.database_url.startswith("postgresql") or self.database_url.startswith("postgres"):
             try:
                 import psycopg2
+                from psycopg2.pool import ThreadedConnectionPool
                 import psycopg2.extras
-                self.conn = psycopg2.connect(self.database_url, cursor_factory=psycopg2.extras.DictCursor)
+                
+                # Initialize connection pool for production
+                self.pool = ThreadedConnectionPool(1, 20, self.database_url)
+                # For compatibility with existing synchronous code, we grab one persistent connection.
+                # In a real async/production environment, this should be checked out per-request.
+                self.conn = self.pool.getconn()
+                self.conn.autocommit = True
+                
+                # Wrap it with DictCursor behavior to match SQLite Row
+                class DictConnectionWrapper:
+                    def __init__(self, conn):
+                        self._conn = conn
+                    def execute(self, query, params=None):
+                        cur = self._conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                        # Basic translation from ? to %s for sqlite compatibility
+                        query = query.replace('?', '%s')
+                        if params:
+                            cur.execute(query, params)
+                        else:
+                            cur.execute(query)
+                        return cur
+                    def commit(self):
+                        self._conn.commit()
+                        
+                self.conn = DictConnectionWrapper(self.conn)
                 self.is_postgres = True
                 return
             except Exception as exc:
@@ -216,6 +245,13 @@ class DriftGuardService:
             )
             """
         )
+        
+        # Add indexes for high-frequency dashboard queries
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_events_project_created ON events (project_id, created_at)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_project_created ON alerts (project_id, created_at)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_events_project_created ON agent_events (project_id, created_at)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_api_key ON projects (api_key)")
+        
         self.conn.commit()
 
     def _load_state(self) -> None:
@@ -315,13 +351,19 @@ class DriftGuardService:
     # ------------------------------------------------------------------
 
     def create_session(self, account_id: str) -> str:
-        """Create and persist a random session token for an existing account."""
+        """Create and persist a JWT session token for an existing account."""
         if account_id not in self.accounts and account_id not in self.conn.execute(
             "SELECT account_id FROM accounts WHERE account_id = ?",
             (account_id,),
         ).fetchall():
             raise KeyError(f"Account {account_id} not found")
-        token = token_urlsafe(24)
+        
+        payload = {
+            "sub": account_id,
+            "exp": datetime.now(timezone.utc) + timedelta(days=7)
+        }
+        token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        
         self.conn.execute(
             "INSERT OR REPLACE INTO sessions (token, account_id) VALUES (?, ?)",
             (token, account_id),
@@ -331,17 +373,17 @@ class DriftGuardService:
         return token
 
     def get_account_for_session(self, token: str) -> str:
-        """Resolve a session token to its owning account identifier."""
-        account_id = self.sessions.get(token)
-        if account_id is None:
-            row = self.conn.execute(
-                "SELECT account_id FROM sessions WHERE token = ?", (token,)
-            ).fetchone()
-            if row is None:
-                raise KeyError(f"Session token {token} not found")
-            account_id = row["account_id"]
-            self.sessions[token] = account_id
-        return account_id
+        """Resolve a JWT session token to its owning account identifier."""
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            account_id = payload.get("sub")
+            if not account_id:
+                raise KeyError("Invalid session token payload")
+            return account_id
+        except jwt.ExpiredSignatureError:
+            raise KeyError("Session token expired")
+        except jwt.InvalidTokenError:
+            raise KeyError("Invalid session token")
 
     # ------------------------------------------------------------------
     # Project management

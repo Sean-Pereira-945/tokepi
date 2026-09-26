@@ -7,7 +7,7 @@ from typing import Any, Annotated
 
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator, model_validator
@@ -18,12 +18,18 @@ from .config import get_database_url
 from .dashboard_data import build_dashboard_summary
 from .middleware import build_api_key_dependency, rate_limit_default, rate_limit_ingestion
 from .service import DEFAULT_POLICY, DriftGuardService
+from .notifications import notify_critical_alert
+from .workers import scrub_pii
 
 app = FastAPI(title="DriftGuard SaaS API", version="0.3.0")
 
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    assets_dir = static_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
 
 service = DriftGuardService(database_url=get_database_url())
 require_valid_api_key = build_api_key_dependency(service)
@@ -58,6 +64,55 @@ def get_dashboard() -> Any:
     return HTMLResponse("<html><body><h1>DriftGuard API Operational</h1></body></html>")
 
 
+@app.get("/tokepi-logo.svg", dependencies=[Depends(rate_limit_default)])
+def get_tokepi_logo() -> Any:
+    """Serve the tokepi logo svg file."""
+    logo_file = static_dir / "tokepi-logo.svg"
+    if logo_file.exists():
+        return FileResponse(logo_file, media_type="image/svg+xml")
+    raise HTTPException(status_code=404, detail="Logo not found")
+
+
+
+# ---------------------------------------------------------------------------
+# WebSockets
+# ---------------------------------------------------------------------------
+
+class ConnectionManager:
+    def __init__(self):
+        # Map of project_id to a list of active websocket connections
+        self.active_connections: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, project_id: str):
+        await websocket.accept()
+        if project_id not in self.active_connections:
+            self.active_connections[project_id] = []
+        self.active_connections[project_id].append(websocket)
+
+    def disconnect(self, websocket: WebSocket, project_id: str):
+        if project_id in self.active_connections and websocket in self.active_connections[project_id]:
+            self.active_connections[project_id].remove(websocket)
+
+    async def broadcast_alert(self, project_id: str, alert: dict[str, Any]):
+        if project_id in self.active_connections:
+            for connection in self.active_connections[project_id]:
+                try:
+                    await connection.send_json(alert)
+                except Exception:
+                    pass
+
+ws_manager = ConnectionManager()
+
+@app.websocket("/ws/alerts/{project_id}")
+async def websocket_alerts_endpoint(websocket: WebSocket, project_id: str):
+    """Maintain a live websocket connection to stream alerts for a specific project."""
+    await ws_manager.connect(websocket, project_id)
+    try:
+        while True:
+            # We just keep the connection open and wait for a disconnect
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, project_id)
 
 
 # ---------------------------------------------------------------------------
@@ -531,6 +586,19 @@ def create_alert(
             },
             account_id=account_id,
         )
+        
+        # Dispatch to Slack if critical
+        notify_critical_alert(request.project_id, alert)
+        
+        # Broadcast via WebSockets
+        import asyncio
+        try:
+            # Try to fetch current loop and run task, or just fallback if not async
+            loop = asyncio.get_running_loop()
+            loop.create_task(ws_manager.broadcast_alert(request.project_id, alert))
+        except RuntimeError:
+            pass # No running event loop
+            
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return alert
@@ -579,7 +647,12 @@ def ingest_event(
             status_code=403,
             detail="API key does not belong to this project",
         )
-    result = service.ingest_event(project_id, request.model_dump(exclude_none=True))
+        
+    payload = request.model_dump(exclude_none=True)
+    if "extra_json" in payload:
+        payload["extra_json"] = scrub_pii(payload["extra_json"])
+        
+    result = service.ingest_event(project_id, payload)
     return result
 
 
@@ -632,7 +705,12 @@ def ingest_agent_event(
     """Ingest one task/tool attempt from an agent adapter."""
     if api_project_id != project_id:
         raise HTTPException(status_code=403, detail="API key does not belong to this project")
-    return service.ingest_agent_event(project_id, request.model_dump(exclude_none=True))
+        
+    payload = request.model_dump(exclude_none=True)
+    if "error_message" in payload:
+        payload["error_message"] = scrub_pii(payload["error_message"])
+        
+    return service.ingest_agent_event(project_id, payload)
 
 
 @app.get("/projects/{project_id}/agent-diagnosis", dependencies=[Depends(rate_limit_default)])

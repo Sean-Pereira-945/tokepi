@@ -1,0 +1,30 @@
+name: Security Checks
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  security:
+    name: Run SAST Scanners
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety
+
+      - name: Run Bandit (SAST)
+        run: bandit -r driftguard/ -c bandit.yaml || true  # We use || true so it doesn't break the build immediately during rollout
+
+      - name: Run Safety (Dependency Check)
+        run: safety check || true

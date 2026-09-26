@@ -8,8 +8,19 @@ from typing import Any
 
 from fastapi import Depends, Header, HTTPException, Request
 
+import os
 from .config import get_rate_limit
 from .service import DriftGuardService
+
+REDIS_URL = os.environ.get("REDIS_URL")
+if REDIS_URL:
+    try:
+        import redis
+        redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    except ImportError:
+        redis_client = None
+else:
+    redis_client = None
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +67,27 @@ _default_limiter = _SlidingWindowCounter(limit=get_rate_limit(), window_seconds=
 _ingestion_limiter = _SlidingWindowCounter(limit=120, window_seconds=60)
 
 
+def _redis_is_allowed(key_prefix: str, key: str, limit: int, window: int) -> bool:
+    """Uses Redis sorted sets for sliding window rate limiting."""
+    if not redis_client:
+        return True
+    
+    redis_key = f"rate_limit:{key_prefix}:{key}"
+    now = time.monotonic()
+    cutoff = now - window
+    
+    pipeline = redis_client.pipeline()
+    pipeline.zremrangebyscore(redis_key, 0, cutoff)
+    pipeline.zadd(redis_key, {str(now): now})
+    pipeline.zcard(redis_key)
+    pipeline.expire(redis_key, window)
+    
+    results = pipeline.execute()
+    current_count = results[2]
+    
+    return current_count <= limit
+
+
 def _client_key(request: Request) -> str:
     """Extract the connecting client address used as the limiter key."""
     return request.client.host if request.client else "unknown"
@@ -64,7 +96,13 @@ def _client_key(request: Request) -> str:
 def rate_limit_default(request: Request) -> None:
     """FastAPI dependency — enforces the default API rate limit."""
     key = _client_key(request)
-    if not _default_limiter.is_allowed(key):
+    
+    if redis_client:
+        allowed = _redis_is_allowed("default", key, get_rate_limit(), 60)
+    else:
+        allowed = _default_limiter.is_allowed(key)
+        
+    if not allowed:
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Please slow down.",
@@ -75,7 +113,13 @@ def rate_limit_default(request: Request) -> None:
 def rate_limit_ingestion(request: Request) -> None:
     """FastAPI dependency — enforces the tighter event ingestion rate limit (120/min)."""
     key = _client_key(request)
-    if not _ingestion_limiter.is_allowed(key):
+    
+    if redis_client:
+        allowed = _redis_is_allowed("ingestion", key, 120, 60)
+    else:
+        allowed = _ingestion_limiter.is_allowed(key)
+        
+    if not allowed:
         raise HTTPException(
             status_code=429,
             detail="Ingestion rate limit exceeded.",

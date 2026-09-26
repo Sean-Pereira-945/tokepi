@@ -75,18 +75,35 @@ The goal of this phase is to interface DriftGuard with real agent loops (such as
 This phase will focus on scaling, security, and making DriftGuard production-ready.
 
 ### What Is Left to Do
-- `[ ]` **Security and Authentication**:
-  - Implement OAuth2 / JWT authentication for the dashboard.
-  - Setup SSL/TLS configurations.
-  - Integrate secret management (for API keys).
-- `[ ]` **Production Storage Migration**:
-  - Replace SQLite with PostgreSQL for ingestion scale.
-  - Add Redis for caching current policies and rate-limiting.
-- `[ ]` **Active Notifications / Alerting**:
-  - Implement WebSockets/SSE for live alerts.
-  - Integrate email (SendGrid) and Slack webhook alerts for critical drift triggers.
-- `[ ]` **Packaging & Distribution**:
-  - Prepare `setup.py` / `pyproject.toml` configuration to publish the `driftguard` package on PyPI.
-- `[ ]` **Data Retention & Privacy Compliance**:
-  - Build worker scripts to clean/prune telemetry after retention periods.
-  - Add anonymization filters to clean PII from LLM prompt inputs before database writes.
+- `[/]` **Security and Authentication**:
+  - `[x]` Implement OAuth2 / JWT authentication for the dashboard.
+  - `[ ]` Setup SSL/TLS configurations.
+  - `[ ]` Integrate secret management (for API keys).
+- `[/]` **Production Storage Migration**:
+  - `[x]` Replace SQLite with PostgreSQL for ingestion scale.
+  - `[ ]` Add Redis for caching current policies and rate-limiting.
+- `[x]` **Active Notifications / Alerting**:
+  - `[x]` Implement WebSockets/SSE for live alerts.
+  - `[x]` Integrate email (SendGrid) and Slack webhook alerts for critical drift triggers.
+- `[x]` **Packaging & Distribution**:
+  - `[x]` Prepare `setup.py` / `pyproject.toml` configuration to publish the `driftguard` package on PyPI.
+- `[x]` **Data Retention & Privacy Compliance**:
+  - `[x]` Build worker scripts to clean/prune telemetry after retention periods.
+  - `[x]` Add anonymization filters to clean PII from LLM prompt inputs before database writes.
+
+---
+
+## Phase 6: Enterprise Readiness & Deployability (Active)
+
+With the core security and functionality complete, this phase focuses on making the SaaS backend easy to self-host for enterprise clients and scaling the data layer.
+
+### What Is Left to Do
+- `[x]` **High-Performance Caching**:
+  - `[x]` Implement Redis for caching project policies and handling distributed rate-limiting.
+- `[ ]` **Secret Management & SSL**:
+  - `[ ]` Build integration for external secret managers (e.g., AWS Secrets Manager, HashiCorp Vault) and enforce SSL/TLS configuration for self-hosted instances.
+- `[x]` **Deployment Blueprints**:
+  - `[x]` Create a `docker-compose.yml` for easy 1-click self-hosting (bundling FastAPI, PostgreSQL, and Redis).
+  - `[ ]` Draft a basic Helm Chart for Kubernetes deployments.
+- `[ ]` **Advanced Dashboard Visualizations**:
+  - `[ ]` Add full agent-trace waterfall visualizations to the frontend to complement the tool diagnosis.
