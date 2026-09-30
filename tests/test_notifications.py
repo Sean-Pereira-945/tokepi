@@ -1,31 +1,45 @@
-import pytest
-from unittest.mock import patch, MagicMock
-from driftguard.notifications import dispatcher, NotificationDispatcher
+from unittest.mock import MagicMock, patch
 
-def test_notify_critical_alert():
-    # Setup a fresh dispatcher with a dummy webhook
-    test_dispatcher = NotificationDispatcher(webhook_url="http://dummy.com")
-    
-    # Test skipping non-critical alerts
-    alert_warning = {"severity": "warning", "message": "Test"}
-    assert test_dispatcher.dispatch_alert("proj-1", alert_warning) is False
+import httpx
 
-    # Test dispatching a critical alert
-    alert_critical = {"severity": "critical", "message": "High drift"}
-    
-    with patch("httpx.Client.post") as mock_post:
-        mock_response = MagicMock()
-        mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
-        
-        result = test_dispatcher.dispatch_alert("proj-1", alert_critical)
-        
-        assert result is True
-        mock_post.assert_called_once()
-        args, kwargs = mock_post.call_args
-        assert kwargs["json"]["text"] == "🚨 *DriftGuard Critical Alert* 🚨\n*Project:* `proj-1`\n*Environment:* `prod`\n*Message:* High drift\n"
+from driftguard.server.notifications import Notifier
 
-def test_notify_no_webhook():
-    test_dispatcher = NotificationDispatcher(webhook_url=None)
-    alert_critical = {"severity": "critical", "message": "High drift"}
-    assert test_dispatcher.dispatch_alert("proj-1", alert_critical) is False
+
+def test_disabled_without_destinations():
+    notifier = Notifier()
+    assert notifier.enabled is False
+    assert notifier.dispatch("p", {"severity": "critical", "message": "x"}) is False
+
+
+def test_only_critical_alerts_are_sent():
+    notifier = Notifier(slack_webhook_url="https://hooks.slack.test/x")
+    with patch("httpx.Client.post") as post:
+        assert notifier.dispatch("p", {"severity": "warning", "message": "x"}) is False
+        post.assert_not_called()
+
+
+def test_slack_and_webhook_payloads():
+    notifier = Notifier(slack_webhook_url="https://hooks.slack.test/x", alert_webhook_url="https://hooks.test/y")
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    with patch("httpx.Client.post", return_value=response) as post:
+        ok = notifier.dispatch("proj-1", {"severity": "critical", "message": "High drift", "environment": "staging"})
+    assert ok is True
+    slack, webhook = post.call_args_list
+    assert "proj-1" in slack.kwargs["json"]["text"] and "staging" in slack.kwargs["json"]["text"]
+    assert webhook.kwargs["json"]["alert"]["message"] == "High drift"
+
+
+def test_delivery_failure_is_reported_not_raised():
+    notifier = Notifier(alert_webhook_url="https://hooks.test/y")
+    with patch("httpx.Client.post", side_effect=httpx.ConnectError("down")):
+        assert notifier.dispatch("p", {"severity": "critical", "message": "x"}) is False
+
+
+def test_notify_runs_in_background():
+    notifier = Notifier(alert_webhook_url="https://hooks.test/y")
+    with patch.object(notifier, "_executor") as executor:
+        notifier.notify("p", {"severity": "critical", "message": "x"})
+        notifier.notify("p", {"severity": "critical", "message": "x", "resolved": True})
+        notifier.notify("p", {"severity": "warning", "message": "x"})
+    executor.submit.assert_called_once()

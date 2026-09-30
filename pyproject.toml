@@ -1,20 +1,20 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "driftguard"
-version = "0.3.0"
-description = "AI observability and drift monitoring SDK for LLM-powered applications"
+version = "0.4.0"
+description = "Observability for LLM apps and AI agents: drift checks, failed-tool diagnosis, and wasted-token accounting"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
-authors = [{ name = "DriftGuard Team" }]
-keywords = ["ai", "observability", "drift", "llm", "monitoring", "mlops"]
+authors = [{ name = "Sean Pereira" }]
+keywords = ["ai", "observability", "drift", "llm", "agents", "mcp", "monitoring"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -24,39 +24,66 @@ classifiers = [
   "Topic :: System :: Monitoring",
 ]
 
+# The SDK only needs an HTTP client. Everything else is an optional extra.
 dependencies = [
-  "fastapi>=0.115.0",
-  "uvicorn>=0.30.6",
-  "numpy>=2.0",
-  "pandas>=2.0",
   "httpx>=0.27.0",
-  "python-dotenv>=1.0.0",
-  "pyjwt>=2.8.0",
-  "psycopg2-binary>=2.9.0",
-  "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]
+server = [
+  "fastapi>=0.140.0",
+  "starlette>=1.3.1",  # earlier releases have published security advisories
+  "uvicorn[standard]>=0.30.6",
+  "sqlalchemy>=2.0.30",
+  "pyjwt>=2.8.0",
+  "python-dotenv>=1.0.0",
+]
+postgres = ["psycopg[binary]>=3.1"]
+redis = ["redis>=5.0.0"]
+all = ["driftguard[server,postgres,redis]"]
+research = ["numpy>=2.0"]
 dev = [
+  "driftguard[all,research]",
   "pytest>=8.0",
-  "pytest-anyio",
-  "httpx>=0.27.0",
+  "ruff>=0.6.0",
   "bandit>=1.7.0",
-  "safety>=2.3.0",
+  "pip-audit>=2.7.0",
 ]
 
 [project.urls]
-Homepage = "https://driftguard.dev"
-Repository = "https://github.com/your-org/driftguard"
-Documentation = "https://docs.driftguard.dev"
-"Bug Tracker" = "https://github.com/your-org/driftguard/issues"
+Homepage = "https://github.com/Sean-Pereira-945/tokepi"
+Repository = "https://github.com/Sean-Pereira-945/tokepi"
+Documentation = "https://github.com/Sean-Pereira-945/tokepi/tree/main/docs"
+"Bug Tracker" = "https://github.com/Sean-Pereira-945/tokepi/issues"
 
 [project.scripts]
-driftguard-server = "driftguard.routes:app"
-
-[tool.pytest.ini_options]
-pythonpath = ["."]
+driftguard-server = "driftguard.server.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["driftguard*"]
+
+[tool.setuptools.package-data]
+"driftguard.server" = ["static/*", "static/**/*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests", "research/tests"]
+filterwarnings = ["error::DeprecationWarning:driftguard.*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["frontend", "*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B011", "E402"]
+"research/*" = ["S311", "E501"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "research", "frontend", ".venv"]
+skips = ["B101"]
