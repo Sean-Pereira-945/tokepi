@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import numpy as np
-
 
 FEATURE_NAMES = ["feature_a", "feature_b", "feature_c"]
 
@@ -40,8 +38,7 @@ def compute_drift_scores(samples: list[dict[str, Any]]) -> dict[str, Any]:
     drift_score = min(1.0, max(0.0, total_shift / 2.0))
 
     feature_scores = {
-        feat: float(abs(latest_means[idx] - reference_means[idx]))
-        for idx, feat in enumerate(FEATURE_NAMES)
+        feat: float(abs(latest_means[idx] - reference_means[idx])) for idx, feat in enumerate(FEATURE_NAMES)
     }
 
     return {

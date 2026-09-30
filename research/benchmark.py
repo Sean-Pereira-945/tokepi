@@ -9,7 +9,6 @@ import numpy as np
 from .data import build_demo_dataset
 from .detector import compute_drift_scores
 
-
 FEATURE_NAMES = ["feature_a", "feature_b", "feature_c"]
 
 

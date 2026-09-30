@@ -49,13 +49,17 @@ def build_research_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "scenario": strongest["scenario"],
                 "drift_guard_score": strongest["report"]["detector_scores"]["driftguard"],
                 "winner": strongest["report"]["winner"],
-                "note": "The strongest observed detection signal occurred under the highest inserted drift magnitude." 
+                "note": "The strongest observed detection signal occurred under the highest inserted drift magnitude.",
             },
             {
                 "scenario": "light_drift",
-                "drift_guard_score": next(item["report"]["detector_scores"]["driftguard"] for item in results if item["scenario"] == "light_drift"),
+                "drift_guard_score": next(
+                    item["report"]["detector_scores"]["driftguard"]
+                    for item in results
+                    if item["scenario"] == "light_drift"
+                ),
                 "winner": next(item["report"]["winner"] for item in results if item["scenario"] == "light_drift"),
-                "note": "The system remains sensitive to moderate drift while maintaining interpretable feature-level traces."
+                "note": "The system remains sensitive to moderate drift while maintaining interpretable feature-level traces.",
             },
         ],
         "benchmark_table": table,

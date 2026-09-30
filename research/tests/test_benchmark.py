@@ -1,5 +1,9 @@
-from driftguard.benchmark import benchmark_report, benchmark_scenarios, run_benchmark_suite
-from driftguard.data import build_demo_dataset
+import pytest
+
+pytest.importorskip("numpy")
+
+from research.benchmark import benchmark_report, benchmark_scenarios, run_benchmark_suite
+from research.data import build_demo_dataset
 
 
 def test_benchmark_report_produces_scores_and_ranking():

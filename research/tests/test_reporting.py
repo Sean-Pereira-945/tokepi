@@ -1,12 +1,18 @@
-from driftguard.experiment import run_experiment_suite
-from driftguard.reporting import build_research_summary, format_benchmark_markdown
+import pytest
+
+pytest.importorskip("numpy")
+
+from research.experiment import run_experiment_suite
+from research.reporting import build_research_summary, format_benchmark_markdown
 
 
 def test_format_benchmark_markdown_contains_expected_columns():
     results = run_experiment_suite()["results"]
     markdown = format_benchmark_markdown(results)
 
-    assert "| Scenario | Drift Start | Drift Magnitude | Mean Shift | Variance Shift | DriftGuard | Winner |" in markdown
+    assert (
+        "| Scenario | Drift Start | Drift Magnitude | Mean Shift | Variance Shift | DriftGuard | Winner |" in markdown
+    )
     assert "light_drift" in markdown
     assert "strong_drift" in markdown
 

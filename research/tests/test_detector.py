@@ -1,11 +1,18 @@
-from driftguard.data import build_demo_dataset, compute_baseline_summary
-from driftguard.detector import compute_drift_scores
+import pytest
+
+pytest.importorskip("numpy")
+
+from research.data import build_demo_dataset, compute_baseline_summary
+from research.detector import compute_drift_scores
 
 
 def test_dataset_has_expected_shape():
     samples = build_demo_dataset(length=90, drift_start=45)
     assert len(samples) == 90
-    assert all(set(sample.keys()) == {"timestamp", "feature_a", "feature_b", "feature_c", "label", "drift_zone"} for sample in samples)
+    assert all(
+        set(sample.keys()) == {"timestamp", "feature_a", "feature_b", "feature_c", "label", "drift_zone"}
+        for sample in samples
+    )
 
 
 def test_baseline_summary_outputs_expected_features():
