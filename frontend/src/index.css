@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #000000;
+  --color-sidebar: #020202;
+  --color-panel: #050505;
+  --color-raised: #0a0a0a;
+  --color-input: #030303;
+  --color-hairline: #171717;
+  --color-hairline-strong: #262626;
+
+  --color-ink: #ffffff;
+  --color-body: #f4f4f5;
+  --color-muted: #a1a1aa;
+
+  --color-cyan: #28c7d9;
+  --color-green: #42d392;
+  --color-amber: #f2b84b;
+  --color-coral: #f06464;
+  --color-violet: #a78bfa;
+
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --animate-rise: rise 220ms ease-out both;
+  --animate-fade: fade 180ms ease-out both;
+  --animate-slide-in: slide-in 200ms ease-out both;
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-in {
+    from { transform: translateX(24px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    background: var(--color-canvas);
+  }
+  body {
+    margin: 0;
+    background-color: var(--color-canvas);
+    color: var(--color-body);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    color: var(--color-ink);
+    line-height: 1.2;
+  }
+  ::selection {
+    background: rgb(40 199 217 / 0.3);
+    color: #fff;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-cyan);
+    outline-offset: 2px;
+  }
+  input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline-offset: 0;
+  }
+  button:not(:disabled), [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #262626 transparent;
+  }
+  input[type="number"] {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Faint 32px technical grid behind the workspace. */
+.workspace-grid {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.select-chevron {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23a1a1aa' stroke-width='1.5'><path d='m4 6 4 4 4-4'/></svg>");
+  background-size: 16px;
+  background-position: right 10px center;
+  background-repeat: no-repeat;
+}
+select option {
+  background: #0a0a0a;
+  color: #f4f4f5;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes status-pulse {
+  0% { box-shadow: 0 0 0 0 rgb(66 211 146 / 0.5); }
+  70% { box-shadow: 0 0 0 6px rgb(66 211 146 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(66 211 146 / 0); }
+}
+.pulse-live {
+  animation: status-pulse 2s ease-out infinite;
+}
+
+/* Recharts: keep focus rings off SVG surfaces that are not interactive. */
+.recharts-surface:focus,
+.recharts-wrapper:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

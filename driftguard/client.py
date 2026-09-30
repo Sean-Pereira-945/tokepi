@@ -1,275 +1,234 @@
-"""Thread-aware SDK client for capturing, evaluating, and syncing telemetry."""
+"""Developer SDK for capturing telemetry, evaluating drift, and syncing to a DriftGuard server."""
 
 from __future__ import annotations
 
+import logging
 import threading
+from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
-from .mitigation import recommend_mitigation
+from .policy import DEFAULT_POLICY, evaluate_drift
 
-# Default drift thresholds — used when no server policy is available
-_DEFAULT_POLICY: dict[str, float] = {
-    "prompt_token_limit": 3000.0,
-    "retrieval_score_floor": 0.5,
-    "context_length_limit": 4000.0,
-    "response_quality_floor": 0.8,
-}
+logger = logging.getLogger(__name__)
+
+# Server-side batch limit (see driftguard.server.schemas.MAX_BATCH_SIZE).
+BATCH_SIZE = 500
+
+
+def _utc_now_iso() -> str:
+    """Return the current UTC time as an ISO 8601 string."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class DriftGuardClient:
-    """Developer-facing SDK for sending app telemetry and evaluating drift risk.
+    """Capture LLM and agent telemetry locally and ship it to a DriftGuard server.
 
     Args:
-        api_key: Project API key obtained from the DriftGuard dashboard.
-        project_name: Logical project name (used for local labelling only).
-        environment: Deployment environment label (e.g. ``"prod"``, ``"staging"``).
-        base_url: Optional URL of the hosted DriftGuard SaaS backend.  When set,
-            :meth:`sync_metrics` will POST events to the backend and
-            :meth:`fetch_policy` will pull server-side drift thresholds.
-        timeout: HTTP request timeout in seconds (default 10).
+        api_key: The project API key returned when the project was created
+            (``dg_live_...``). Never pass an LLM provider key here.
+        project_name: Label for this application. Used as the default
+            ``agent_name`` on agent events.
+        environment: Deployment label: ``prod``, ``staging``, ``dev``, or ``test``.
+        base_url: URL of the DriftGuard server. Required for sync and fetch calls;
+            :meth:`check_drift` works offline without it.
+        timeout: HTTP timeout in seconds.
+        project_id: Default project ID for sync and fetch calls, so they can be
+            called without arguments.
+        max_queue: Maximum queued events per queue. When full, the oldest event
+            is dropped and a warning is logged.
     """
 
     def __init__(
         self,
         api_key: str,
-        project_name: str,
+        project_name: str | None = None,
         environment: str = "prod",
         base_url: str | None = None,
         timeout: float = 10.0,
+        project_id: str | None = None,
+        max_queue: int = 10_000,
     ) -> None:
-        """Initialize local telemetry queues, backend settings, and policy defaults."""
         self.api_key = api_key
-        self.project_name = project_name
+        self.project_name = project_name or project_id or "driftguard-app"
         self.environment = environment
         self.base_url = base_url.rstrip("/") if base_url else None
         self.timeout = timeout
+        self.project_id = project_id
+        self.max_queue = max_queue
         self.metrics: list[dict[str, Any]] = []
         self.agent_events: list[dict[str, Any]] = []
-        self._policy: dict[str, float] = dict(_DEFAULT_POLICY)
+        self._queue_lock = threading.Lock()
+        self._policy: dict[str, float] = dict(DEFAULT_POLICY)
         self._policy_lock = threading.Lock()
 
     # ------------------------------------------------------------------
-    # Telemetry capture
+    # Capture
     # ------------------------------------------------------------------
+
+    def _enqueue(self, queue: list[dict[str, Any]], payload: dict[str, Any]) -> None:
+        """Append to a queue under the lock, dropping the oldest item when full."""
+        with self._queue_lock:
+            if len(queue) >= self.max_queue:
+                queue.pop(0)
+                logger.warning("DriftGuard queue full (%d); dropped the oldest event", self.max_queue)
+            queue.append(payload)
 
     def capture_metrics(self, **metrics: Any) -> dict[str, Any]:
-        """Record a single telemetry event locally.
+        """Queue one LLM telemetry event.
 
-        Returns the full payload that was captured (including project and environment
-        labels).  Call :meth:`sync_metrics` afterwards to ship events to the backend.
+        Pass any of ``prompt_tokens``, ``context_length``, ``retrieval_score`` and
+        ``response_quality``. The capture time is recorded as ``occurred_at`` so
+        delayed syncs keep accurate timestamps. Returns the queued payload.
         """
         payload: dict[str, Any] = {
-            "project": self.project_name,
             "environment": self.environment,
+            "occurred_at": _utc_now_iso(),
             **metrics,
         }
-        self.metrics.append(payload)
+        self._enqueue(self.metrics, payload)
         return payload
 
-    # ------------------------------------------------------------------
-    # Backend sync
-    # ------------------------------------------------------------------
-
     def capture_agent_event(self, **event: Any) -> dict[str, Any]:
-        """Queue one agent task/tool attempt for retry and failure analysis."""
+        """Queue one agent task/tool attempt for retry and failure analysis.
+
+        Required fields: ``task_id``, ``tool_name``, ``status``. Optional:
+        ``trace_id``, ``tool_call_id``, ``attempt``, ``error_type``,
+        ``error_message``, ``prompt_tokens``, ``completion_tokens``,
+        ``total_tokens``, ``duration_ms``, ``model``, ``input_hash``.
+        """
         payload = {
             "agent_name": self.project_name,
             "environment": self.environment,
+            "occurred_at": _utc_now_iso(),
             **event,
         }
-        self.agent_events.append(payload)
+        self._enqueue(self.agent_events, payload)
         return payload
 
-    def sync_agent_events(self, project_id: str) -> dict[str, Any]:
-        """Send queued agent task/tool attempts to the DriftGuard backend."""
+    # ------------------------------------------------------------------
+    # Sync
+    # ------------------------------------------------------------------
+
+    def _require_base_url(self) -> str:
         if not self.base_url:
-            raise RuntimeError(
-                "base_url is not configured. Pass base_url=<server> to DriftGuardClient."
-            )
-        if not self.agent_events:
+            raise RuntimeError("base_url is not configured. Pass base_url=<server> to DriftGuardClient.")
+        return self.base_url
+
+    def _resolve_project(self, project_id: str | None) -> str:
+        resolved = project_id or self.project_id
+        if not resolved:
+            raise ValueError("project_id is required (pass it here or to DriftGuardClient).")
+        return resolved
+
+    def _sync_queue(self, queue: list[dict[str, Any]], path: str) -> dict[str, Any]:
+        """Send a queue in batches. Events from failed batches stay queued."""
+        base_url = self._require_base_url()
+        with self._queue_lock:
+            pending = list(queue)
+            queue.clear()
+        if not pending:
             return {"synced": 0, "skipped": True}
 
         synced = 0
         errors: list[str] = []
-        headers = {"X-API-Key": self.api_key, "Content-Type": "application/json"}
-        with httpx.Client(timeout=self.timeout) as http:
-            for event in self.agent_events:
-                try:
-                    response = http.post(
-                        f"{self.base_url}/agent-events/{project_id}",
-                        json=event,
-                        headers=headers,
-                    )
-                    response.raise_for_status()
-                    synced += 1
-                except httpx.HTTPError as exc:
-                    errors.append(str(exc))
-
-        if synced == len(self.agent_events):
-            self.agent_events.clear()
-        elif synced > 0:
-            self.agent_events = self.agent_events[synced:]
-        return {"synced": synced, "errors": errors}
-
-    def fetch_agent_diagnosis(self, project_id: str) -> dict[str, Any]:
-        """Fetch the latest failed-tool and retry diagnosis for a project."""
-        if not self.base_url:
-            raise RuntimeError(
-                "base_url is not configured. Pass base_url=<server> to DriftGuardClient."
-            )
+        failed: list[dict[str, Any]] = []
         headers = {"X-API-Key": self.api_key}
         with httpx.Client(timeout=self.timeout) as http:
-            response = http.get(
-                f"{self.base_url}/projects/{project_id}/agent-diagnosis",
-                headers=headers,
-            )
+            for start in range(0, len(pending), BATCH_SIZE):
+                batch = pending[start : start + BATCH_SIZE]
+                try:
+                    response = http.post(f"{base_url}{path}", json={"events": batch}, headers=headers)
+                    response.raise_for_status()
+                    synced += len(batch)
+                except httpx.HTTPError as exc:
+                    errors.append(str(exc))
+                    failed.extend(batch)
+
+        if failed:
+            with self._queue_lock:
+                queue[:0] = failed[-self.max_queue :]
+        return {"synced": synced, "errors": errors}
+
+    def sync_metrics(self, project_id: str | None = None) -> dict[str, Any]:
+        """Send queued telemetry to the server. Returns ``{"synced", "errors"}``."""
+        pid = self._resolve_project(project_id)
+        return self._sync_queue(self.metrics, f"/events/{pid}/batch")
+
+    def sync_agent_events(self, project_id: str | None = None) -> dict[str, Any]:
+        """Send queued agent attempts to the server. Returns ``{"synced", "errors"}``."""
+        pid = self._resolve_project(project_id)
+        return self._sync_queue(self.agent_events, f"/agent-events/{pid}/batch")
+
+    def flush(self, project_id: str | None = None) -> dict[str, Any]:
+        """Sync both queues and return both results."""
+        return {"metrics": self.sync_metrics(project_id), "agent_events": self.sync_agent_events(project_id)}
+
+    def _in_background(self, target: Any, project_id: str | None) -> threading.Thread:
+        pid = self._resolve_project(project_id)
+        thread = threading.Thread(target=target, args=(pid,), daemon=True)
+        thread.start()
+        return thread
+
+    def sync_metrics_async(self, project_id: str | None = None) -> threading.Thread:
+        """Sync telemetry on a daemon thread without blocking the caller."""
+        return self._in_background(self.sync_metrics, project_id)
+
+    def sync_agent_events_async(self, project_id: str | None = None) -> threading.Thread:
+        """Sync agent attempts on a daemon thread without blocking the caller."""
+        return self._in_background(self.sync_agent_events, project_id)
+
+    # ------------------------------------------------------------------
+    # Server reads
+    # ------------------------------------------------------------------
+
+    def _get(self, path: str) -> Any:
+        base_url = self._require_base_url()
+        with httpx.Client(timeout=self.timeout) as http:
+            response = http.get(f"{base_url}{path}", headers={"X-API-Key": self.api_key})
             response.raise_for_status()
             return response.json()
 
-    def sync_metrics(self, project_id: str) -> dict[str, Any]:
-        """POST all locally captured metrics to the DriftGuard SaaS backend.
-
-        Args:
-            project_id: The project ID registered in the SaaS backend.
-
-        Returns:
-            A dict with ``"synced"`` count and any ``"error"`` message.
-
-        Raises:
-            RuntimeError: If ``base_url`` was not configured.
-        """
-        if not self.base_url:
-            raise RuntimeError(
-                "base_url is not configured.  Pass base_url=<server> to DriftGuardClient."
-            )
-
-        if not self.metrics:
-            return {"synced": 0, "skipped": True}
-
-        synced = 0
-        errors: list[str] = []
-        headers = {"X-API-Key": self.api_key, "Content-Type": "application/json"}
-
-        with httpx.Client(timeout=self.timeout) as http:
-            for event in self.metrics:
-                try:
-                    response = http.post(
-                        f"{self.base_url}/events/{project_id}",
-                        json=event,
-                        headers=headers,
-                    )
-                    response.raise_for_status()
-                    synced += 1
-                except httpx.HTTPError as exc:
-                    errors.append(str(exc))
-
-        # Clear successfully synced metrics
-        if synced == len(self.metrics):
-            self.metrics.clear()
-        elif synced > 0:
-            self.metrics = self.metrics[synced:]
-
-        return {"synced": synced, "errors": errors}
-
-    def sync_metrics_async(self, project_id: str) -> None:
-        """Fire-and-forget background sync.  Does not block the calling thread."""
-        thread = threading.Thread(
-            target=self.sync_metrics, args=(project_id,), daemon=True
-        )
-        thread.start()
-
-    # ------------------------------------------------------------------
-    # Server-side policy
-    # ------------------------------------------------------------------
-
-    def fetch_policy(self, project_id: str) -> dict[str, float]:
-        """Pull drift thresholds from the SaaS backend for this project.
-
-        Updates the internal policy cache used by :meth:`check_drift`.
-
-        Returns:
-            The active policy dict (merged with local defaults for any missing keys).
-
-        Raises:
-            RuntimeError: If ``base_url`` was not configured.
-        """
-        if not self.base_url:
-            raise RuntimeError(
-                "base_url is not configured.  Pass base_url=<server> to DriftGuardClient."
-            )
-
-        headers = {"X-API-Key": self.api_key}
-        with httpx.Client(timeout=self.timeout) as http:
-            response = http.get(
-                f"{self.base_url}/projects/{project_id}/policy",
-                headers=headers,
-            )
-            response.raise_for_status()
-            server_policy: dict[str, Any] = response.json()
-
+    def fetch_policy(self, project_id: str | None = None) -> dict[str, float]:
+        """Pull the project's thresholds and use them for :meth:`check_drift`."""
+        server_policy: Mapping[str, Any] = self._get(f"/projects/{self._resolve_project(project_id)}/policy")
         with self._policy_lock:
-            self._policy = {**_DEFAULT_POLICY, **server_policy}
+            self._policy = {**DEFAULT_POLICY, **{k: float(v) for k, v in server_policy.items()}}
+            return dict(self._policy)
 
-        return dict(self._policy)
+    def fetch_agent_diagnosis(self, project_id: str | None = None) -> dict[str, Any]:
+        """Fetch the failed-tool and retry diagnosis for the project."""
+        return self._get(f"/projects/{self._resolve_project(project_id)}/agent-diagnosis")
 
     # ------------------------------------------------------------------
-    # Drift evaluation
+    # Local evaluation
     # ------------------------------------------------------------------
+
+    @property
+    def policy(self) -> dict[str, float]:
+        """The thresholds :meth:`check_drift` currently uses."""
+        with self._policy_lock:
+            return dict(self._policy)
 
     def check_drift(self) -> dict[str, Any]:
-        """Evaluate drift risk from the most recently captured metric payload.
+        """Score the most recently captured metrics against the active policy.
 
-        Uses server-fetched thresholds when available (set via :meth:`fetch_policy`),
-        otherwise falls back to the built-in defaults.
-
-        Returns:
-            A dict with ``severity``, ``risk_score``, ``recommendation``,
-            ``actions``, and ``root_cause``.
+        Works offline. Returns ``severity``, ``risk_score``, ``violations``,
+        ``recommendation``, ``actions``, and ``root_cause``.
         """
-        if not self.metrics:
+        with self._queue_lock:
+            latest = self.metrics[-1] if self.metrics else None
+        if latest is None:
             return {
                 "severity": "stable",
-                "recommendation": "No telemetry yet.",
-                "actions": [],
                 "risk_score": 0.0,
+                "violations": [],
+                "recommendation": "no_telemetry_yet",
+                "actions": [],
                 "root_cause": "",
             }
-
-        latest = self.metrics[-1]
-        risk_score = 0.0
-
-        with self._policy_lock:
-            policy = dict(self._policy)
-
-        prompt_tokens = float(latest.get("prompt_tokens", 0))
-        retrieval_score = float(latest.get("retrieval_score", 1.0))
-        context_length = float(latest.get("context_length", 0))
-        response_quality = float(latest.get("response_quality", 1.0))
-
-        if prompt_tokens > policy["prompt_token_limit"]:
-            risk_score += 0.25
-        if retrieval_score < policy["retrieval_score_floor"]:
-            risk_score += 0.35
-        if context_length > policy["context_length_limit"]:
-            risk_score += 0.2
-        if response_quality < policy["response_quality_floor"]:
-            risk_score += 0.2
-
-        risk_score = min(1.0, risk_score)
-
-        severity = "stable"
-        if risk_score >= 0.75:
-            severity = "critical"
-        elif risk_score >= 0.4:
-            severity = "warning"
-
-        mitigation = recommend_mitigation(latest)
-        return {
-            "severity": severity,
-            "risk_score": round(risk_score, 3),
-            "recommendation": mitigation["recommended_action"],
-            "actions": mitigation["actions"],
-            "root_cause": mitigation["root_cause"],
-        }
+        result = evaluate_drift(latest, self.policy)
+        result.pop("token_savings_ratio", None)
+        return result

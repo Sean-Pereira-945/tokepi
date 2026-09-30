@@ -1,202 +1,109 @@
 # DriftGuard
 
-**LLM and AI-Agent Observability, Failed-Tool Diagnosis, and Token-Waste Protection**
+**Observability for LLM applications and AI agents: catch drift, find the tool
+that's blocking your agent, and count the tokens it's wasting.**
 
-DriftGuard is designed to observe LLM applications and AI coding agents. Its target workflow is to detect repetitive failed requests, identify the connected tool blocking a task, estimate tokens wasted by failed or redundant attempts, and explain the problem to the developer. The current release is the telemetry foundation: it captures normalized LLM metrics, stores project-scoped events, evaluates drift thresholds, and displays live dashboard data. Full task/tool retry analysis requires an agent adapter or tool gateway and is not yet shipped.
+When an agent keeps retrying a failing tool, you pay for every attempt and the
+task never finishes. DriftGuard receives one event per tool call and names the
+blocking tool. It totals the wasted tokens and alerts you, for example: *"The
+terminal tool failed 3 times in a row on task fix-tests; 6,600 tokens were spent
+on failed or redundant attempts."* It also scores ordinary LLM traffic for drift:
+prompt and context bloat, falling retrieval relevance, and falling response
+quality.
 
----
+- **Agent diagnosis.** Per-task status (blocked, failing, recovered, healthy),
+  the blocking tool, repeated and redundant attempts, wasted tokens, and advice
+  based on the error.
+- **Drift scoring.** Four normalized metrics are checked against per-project
+  thresholds and turned into a severity, a root cause, and a recommended
+  mitigation.
+- **Alerts that manage themselves.** Critical drift and blocked tasks raise
+  alerts. Agent alerts resolve themselves when the task recovers. Alerts are
+  pushed live to the dashboard, Slack, or any webhook.
+- **Drop-in adapters.** A `@driftguard_tool` decorator, MCP session
+  instrumentation, and token extraction from OpenAI, Anthropic, and Gemini
+  responses.
+- **Self-hostable.** A FastAPI server, a React dashboard, and SQLite or
+  PostgreSQL, with Redis when you scale out. One `docker compose up`.
 
-## Key Capabilities
-
-* **Real-Time Drift Detection**: Monitor `prompt_tokens`, `context_length`, `retrieval_score`, and `response_quality` per AI request or agent turn.
-* **Mitigation Recommendations**: Recommend context compression, retrieval trimming, or model fallback when configured metrics cross thresholds. The current release does not silently modify an agent or switch a provider.
-* **Root-Cause Analysis & Explainability**: Isolate whether degraded AI behavior is caused by prompt inflation, RAG chunk noise, model hallucination, or context dilution.
-* **Hosted SaaS Dashboard**: Live dark-glass monitoring UI displaying real-time drift timelines, alert feeds, token savings metrics, and project policy editors.
-* **Agent Integration Direction**: Provides the SDK boundary for future multi-turn coding-agent adapters. It does not currently intercept GitHub Copilot sessions or connected tools automatically.
-
-### Product North Star and Current Boundary
-
-The intended agent workflow is:
-
-```text
-AI agent -> DriftGuard adapter -> tools
-        |
-        v
-  task/tool/retry telemetry -> DriftGuard -> developer diagnosis
-```
-
-The future adapter will report a task ID, tool name, attempt number, success or
-failure, error details, and token usage. DriftGuard will then group attempts,
-detect repeated failures, calculate wasted tokens, identify the blocking tool, and
-show a message such as: "The terminal tool failed three times while running tests;
-the task is blocked and 6,420 tokens were spent on retries."
-
-Today, the SDK accepts four normalized metrics (`prompt_tokens`,
-`context_length`, `retrieval_score`, and `response_quality`). It does not yet
-receive tool-call histories, retry relationships, or Copilot internals.
-
-The first agent-observability slice is now available through the SDK:
-
-```python
-client.capture_agent_event(
-  task_id="fix-tests",
-  trace_id="trace-1",
-  tool_name="terminal",
-  attempt=3,
-  status="failed",
-  error_type="command_failed",
-  error_message="pytest exited with code 1",
-  total_tokens=2200,
-)
-client.sync_agent_events("my-ai-service")
-diagnosis = client.fetch_agent_diagnosis("my-ai-service")
-```
-
-The dashboard's **Agent Task Diagnosis** panel reports the blocking tool, failed
-attempts, repeated attempts, wasted tokens, severity, and recommendation. An
-adapter still needs to call these methods because DriftGuard cannot automatically
-observe private Copilot sessions.
-
----
+DriftGuard observes what your code reports, and it recommends actions rather
+than taking them. It doesn't intercept closed agents such as GitHub Copilot, and
+it never changes prompts or providers. See
+[what it can't observe](docs/agent-integration.md#what-driftguard-cannot-observe).
 
 ## Quickstart
 
-### 1. Installation
-
 ```bash
-pip install driftguard
+pip install "driftguard[server]"
+driftguard-server                    # dashboard and API at http://127.0.0.1:8000
 ```
 
-### 2. Basic Python SDK Usage
+Create an account and a project in the dashboard, and copy the project API key.
+Then, in your app:
 
 ```python
 from driftguard import DriftGuardClient
+from driftguard.adapters import AgentContext, driftguard_tool
 
-# Initialize the client (supports local evaluation or SaaS backend sync)
-client = DriftGuardClient(
-    api_key="dg_live_your_api_key",
-    project_name="my-llm-service",
-    environment="prod",
-    base_url="http://localhost:8000"  # Optional SaaS backend URL
-)
+client = DriftGuardClient(api_key="dg_live_...", project_id="coding-agent",
+                          base_url="http://127.0.0.1:8000")
 
-# 1. Record telemetry metrics for an AI call
-client.capture_metrics(
-    prompt_tokens=4200,
-    context_length=5500,
-    retrieval_score=0.35,  # Low retrieval relevance
-    response_quality=0.65  # Quality degradation
-)
+# LLM telemetry
+client.capture_metrics(prompt_tokens=5200, context_length=6100,
+                       retrieval_score=0.31, response_quality=0.62)
+client.check_drift()   # {'severity': 'critical', 'risk_score': 1.0, 'actions': [...], ...}
+client.sync_metrics()
 
-# 2. Check for real-time drift & risk score (0.0 to 1.0)
-drift_report = client.check_drift()
-print(drift_report)
+# Agent tool calls
+@driftguard_tool("terminal")
+def run(cmd): ...
 
-# 3. Ship telemetry to the SaaS dashboard (non-blocking)
-client.sync_metrics_async(project_id="proj_01")
+with AgentContext(client, task_id="fix-tests", auto_sync=True) as ctx:
+    ctx.record_llm_usage(llm_response)   # attach model tokens to the next tool call
+    run("pytest -x")
+
+client.fetch_agent_diagnosis()["diagnosis"]
 ```
 
-### 3. Example Drift & Mitigation Output
+The SDK itself (`pip install driftguard`) depends only on `httpx`. The full
+walkthrough, including Docker, is in [docs/quickstart.md](docs/quickstart.md).
 
-```json
-{
-  "severity": "critical",
-  "risk_score": 0.8,
-  "recommendation": "compress_prompt_context_and_reduce_context_window",
-  "actions": [
-    "compress_prompt_context",
-    "trim_retrieval_results"
-  ],
-  "root_cause": "prompt context inflation; retrieval degradation"
-}
+## Documentation
+
+| | |
+| --- | --- |
+| [Quickstart](docs/quickstart.md) | Server, first project, first events, in ten minutes |
+| [Giving a demo](docs/demo.md) | A five-minute live demo script with talking points |
+| [Agent integration](docs/agent-integration.md) | Decorator, MCP, raw events, and what can't be observed |
+| [Dashboard guide](docs/dashboard.md) | What every view and metric means |
+| [API reference](docs/api.md) | Every endpoint, with real request and response bodies |
+| [Architecture](docs/architecture.md) | Components, scoring and diagnosis algorithms, data model, security |
+| [Configuration](docs/configuration.md) | Environment variables and policy settings |
+| [Deployment](docs/deployment.md) | Docker Compose, TLS, scaling, backups, upgrading from 0.3 |
+| [Development](docs/development.md) | Repo layout, tests on SQLite/Postgres/Redis, CI, releasing |
+| [Roadmap](docs/roadmap.md) | What's done and what's next |
+| [Changelog](CHANGELOG.md) | Release history |
+
+## Repository layout
+
+```text
+driftguard/     the Python package: SDK, adapters, and driftguard.server
+frontend/       dashboard source (React + Vite); builds into driftguard/server/static
+research/       Phase 1 synthetic drift research prototypes
+tests/          SDK and server test suite
+examples/       runnable scripts, including the live demo (demo.bat runs it on Windows)
+docs/           documentation
 ```
 
----
-
-## 🖥️ Launching the Backend & Dashboard
-
-To start the hosted SaaS API and live dashboard locally:
+## Development
 
 ```bash
-driftguard-server
-# Or directly via uvicorn:
-uvicorn driftguard.routes:app --reload --port 8000
+pip install -e ".[dev]"
+pytest                                   # SQLite; see docs/development.md for Postgres/Redis
+ruff check . && ruff format --check .
+cd frontend && npm install && npm run dev
 ```
 
-Open your browser to `http://localhost:8000` to access the interactive **DriftGuard Live Dashboard**.
+## License
 
-### Dashboard workflow
-
-1. Select a project and environment from the header dropdowns.
-2. Use **Refresh** to reload telemetry, alerts, metrics, and charts.
-3. Use **Test Telemetry** to post a real authenticated sample event while wiring an integration.
-4. Open **Mitigation Rules** to save project thresholds.
-5. Open **SDK Integration** for the provider-neutral integration shape.
-
-The dashboard only needs normalized telemetry. It works with Gemini, OpenAI,
-Anthropic, Ollama, or any custom LLM because DriftGuard does not own the model
-request. After your existing model call, map token usage, context size, retrieval
-quality, and response quality into `capture_metrics(...)`, then call
-`sync_metrics(project_id)`.
-
-The dashboard is project-scoped by the **DriftGuard project API key**. Paste the
-key returned when you create a project into the dashboard key field. Never paste
-your LLM provider secret into DriftGuard; provider credentials remain in your app.
-
----
-
-## ⚙️ Environment Configuration
-
-Create a `.env` file in your project root:
-
-```env
-# Database connection (defaults to local SQLite if unset)
-DATABASE_URL=sqlite:///./driftguard.db
-# For production SaaS deploy (e.g. Neon DB / PostgreSQL):
-# DATABASE_URL=postgresql://user:password@ep-xxxx.neon.tech/driftguard?sslmode=require
-
-# Rate limiting (requests per minute per IP)
-RATE_LIMIT_PER_MINUTE=60
-
-# Secret key for session authentication
-API_SECRET=your-production-secret-key
-```
-
----
-
-## Using DriftGuard with AI Coding Agents
-
-DriftGuard can be integrated with an AI coding agent when the agent host, extension,
-MCP gateway, or wrapper emits telemetry. GitHub Copilot is not automatically
-observable from this repository because its private agent session and tool events
-are not exposed to DriftGuard.
-
-See **[setup_on_agent.md](docs/setup_on_agent.md)** for the current adapter contract,
-the supported telemetry foundation, and the event schema required for full retry
-and tool-failure diagnosis.
-
----
-
-## 📁 Repository Architecture
-
-* `driftguard/client.py`: Developer-facing SDK (`DriftGuardClient`) with telemetry sync and policy caching.
-* `driftguard/agent_analysis.py`: Failed-tool, retry, blocked-task, and wasted-token analysis.
-* `driftguard/mitigation.py`: Automated token-savings and mitigation recommendation engine.
-* `driftguard/routes.py`: FastAPI SaaS backend (Accounts, Ingestion, Policy Management).
-* `driftguard/service.py`: SQLite/PostgreSQL persistence layer and query handlers.
-* `driftguard/middleware.py`: Rate limiting dependencies and API key authentication.
-* `driftguard/api.py`: Hosted SaaS Dashboard UI launcher and dynamic HTML/CSS templates.
-* `driftguard/detector.py`: Core mathematical drift scoring engine.
-* `docs/setup_on_agent.md`: Comprehensive Antigravity coding agent integration guide.
-* `docs/QUICKSTART.md`: Developer onboarding walkthrough.
-* `docs/explainability.md`: Explanation of dashboard terms and metrics.
-
----
-
-## 🧪 Running Tests
-
-Run the complete test suite (62 tests):
-
-```bash
-pytest
-```
+MIT. See [LICENSE](LICENSE).

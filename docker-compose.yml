@@ -1,4 +1,10 @@
-version: '3.8'
+# Self-hosted DriftGuard: API + dashboard, PostgreSQL, and Redis.
+#
+#   cp .env.example .env    # set DRIFTGUARD_SECRET_KEY and POSTGRES_PASSWORD
+#   docker compose up -d --build
+#
+# The dashboard is served at http://localhost:8000. Put a TLS-terminating reverse
+# proxy (Caddy, nginx, a cloud load balancer) in front of it for public use.
 
 services:
   api:
@@ -6,34 +12,46 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://driftguard:supersecret@db:5432/driftguard_db
-      - REDIS_URL=redis://cache:6379/0
-      - JWT_SECRET=change-this-in-production-12345
+      DRIFTGUARD_ENV: production
+      DRIFTGUARD_SECRET_KEY: ${DRIFTGUARD_SECRET_KEY:?Set DRIFTGUARD_SECRET_KEY in .env}
+      DATABASE_URL: postgresql://driftguard:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/driftguard
+      REDIS_URL: redis://cache:6379/0
+      DRIFTGUARD_WORKERS: ${DRIFTGUARD_WORKERS:-2}
+      DRIFTGUARD_ALLOW_SIGNUP: ${DRIFTGUARD_ALLOW_SIGNUP:-true}
+      DRIFTGUARD_RETENTION_DAYS: ${DRIFTGUARD_RETENTION_DAYS:-30}
+      DRIFTGUARD_SLACK_WEBHOOK: ${DRIFTGUARD_SLACK_WEBHOOK:-}
+      DRIFTGUARD_ALERT_WEBHOOK: ${DRIFTGUARD_ALERT_WEBHOOK:-}
     depends_on:
-      - db
-      - cache
-    restart: always
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    restart: unless-stopped
 
   db:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     environment:
-      - POSTGRES_USER=driftguard
-      - POSTGRES_PASSWORD=supersecret
-      - POSTGRES_DB=driftguard_db
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: driftguard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: driftguard
     volumes:
       - pgdata:/var/lib/postgresql/data
-    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U driftguard -d driftguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
   cache:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redisdata:/data
-    restart: always
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
 
 volumes:
   pgdata:
-  redisdata:

@@ -1,30 +1,40 @@
-name: Security Checks
+name: Security
 
 on:
   push:
     branches: ["main"]
   pull_request:
-    branches: ["main"]
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+
+permissions:
+  contents: read
 
 jobs:
-  security:
-    name: Run SAST Scanners
+  python:
+    name: Bandit and pip-audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[all]" bandit pip-audit
+      - name: Bandit (static analysis)
+        run: bandit -c pyproject.toml -r driftguard
+      - name: pip-audit (known vulnerabilities in installed dependencies)
+        run: pip-audit --skip-editable
 
-      - name: Install security tools
-        run: |
-          python -m pip install --upgrade pip
-          pip install bandit safety
-
-      - name: Run Bandit (SAST)
-        run: bandit -r driftguard/ -c bandit.yaml || true  # We use || true so it doesn't break the build immediately during rollout
-
-      - name: Run Safety (Dependency Check)
-        run: safety check || true
+  npm:
+    name: npm audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm audit --omit=dev --audit-level=high
