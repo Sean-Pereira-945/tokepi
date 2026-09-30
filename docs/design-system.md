@@ -2,13 +2,13 @@
 
 **Project:** DriftGuard
 **Purpose:** A professional observability console for monitoring LLM quality, detecting prompt and retrieval drift, diagnosing failed agent tools, and reducing wasted tokens.
-**Design source:** Existing DriftGuard dashboard shell and backend product language.
+**Implementation:** `frontend/` (React + Tailwind). Tokens live in `frontend/src/index.css`.
 
 ## 1. Visual Theme & Atmosphere
 
 DriftGuard is a dense, serious developer operations interface. The visual language is dark, precise, and technical without becoming noisy or cyberpunk-themed. It should feel like a trusted control room for AI reliability: calm when systems are healthy, unmistakable when intervention is needed, and optimized for scanning live metrics rather than browsing marketing content.
 
-Use a near-black workspace with a faint technical grid, graphite navigation surfaces, thin borders, compact panels, and restrained glow only for active or critical states. Favor strong hierarchy, short labels, monospace telemetry values, and clear status color semantics. Avoid decorative hero sections, stock imagery, login or signup screens, excessive gradients, and oversized rounded cards.
+Use a near-black workspace with a faint technical grid, graphite navigation surfaces, thin borders, compact panels, and restrained glow only for active or critical states. Favor strong hierarchy, short labels, monospace telemetry values, and clear status color semantics. Avoid decorative hero sections, stock imagery, marketing-style login or signup pages, excessive gradients, and oversized rounded cards. Sign-in is a single compact panel on the workspace background.
 
 The UI represents real product capabilities. Do not imply that DriftGuard automatically observes private Copilot sessions or silently changes model providers. Use precise language such as "normalized telemetry," "agent event," "blocking tool," "wasted tokens," and "recommendation."
 
@@ -112,7 +112,9 @@ Use drawers for event and alert detail because users should retain dashboard con
 
 Motion is functional and restrained. Use 150-220ms ease-out transitions for navigation, buttons, filters, drawers, and chart state changes. Use a short page-load reveal for major dashboard sections with a small stagger, but avoid continuous ambient animation except for the online status pulse.
 
-### Dynamic Hover Ring
+### Dynamic Hover Ring (optional, not implemented)
+
+The 0.4 dashboard does not ship this effect. The spec is kept for a possible later enhancement.
 
 Use the Dynamic Hover Ring as an optional desktop pointer enhancement for clickable dashboard elements and links:
 

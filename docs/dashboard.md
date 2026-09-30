@@ -1,62 +1,175 @@
-# DriftGuard Dashboard: A Beginner's Guide
+# Dashboard guide
 
-Welcome to the **DriftGuard Dashboard**! Think of this as the control center for your AI applications. It helps you easily monitor how well your AI is performing, whether it is making mistakes, or if it is wasting money. 
+The dashboard is served at the root of your DriftGuard server. Every number on
+it comes from the API. A missing value shows as **—**, and an empty list tells
+you how to start sending data. Nothing is estimated or filled in by the browser.
 
-This guide explains all the key features of the dashboard in plain, easy-to-understand language.
+## Signing in
 
----
+Create an account or sign in with an email and password. Administrators can turn
+off new sign-ups with `DRIFTGUARD_ALLOW_SIGNUP=false`, which hides the sign-up
+form. If your session expires or is revoked, you return to the sign-in screen.
 
-## 1. The Big Picture (Overview Metrics)
+## The header
 
-At the top of your dashboard, you will see a quick summary of how your AI is doing right now:
+| Control | What it does |
+| --- | --- |
+| **Project** | The application being viewed. Use **+** to create a project. Its API key is shown **once**, so copy it. |
+| **Environment** | `All`, `prod`, `staging`, `dev`, or `test`. Filters every view. |
+| **Time range** | Last 15 minutes up to 30 days, or all. Filters every view. Default: 24 hours. |
+| **Live indicator** | State of the realtime connection: **Live**, **Connecting**, **Reconnecting**, or **Offline**. When live, new alerts appear without a refresh, and a new critical alert shows a notification. |
+| **Refresh** | Reloads every view. |
+| **Test Telemetry** | Sends one event with the four metrics you enter and shows how the server scored it. Use it to check thresholds. It doesn't replace instrumenting your app. |
 
-* **Total Telemetry Events:** This simply means "How many times was the AI used recently?" It gives you a sense of how busy your application is.
-* **Saved Tokens / Cost:** Every time the AI reads or writes a word, it uses "tokens", which cost money. This number shows how much money DriftGuard has saved you by catching bad or repetitive behavior.
-* **Active / Critical Alerts:** If your AI starts acting strangely or making poor decisions, an alert will pop up here. "Critical" means it needs your attention immediately.
-* **Mean Retrieval Score (Relevance):** This is a score from 0 to 1 that tells you how relevant the information fed to the AI is. A score closer to 1 means the AI is getting high-quality, relevant information to do its job.
+The dashboard remembers your project and filters in this browser.
 
----
+## Overview
 
-## 2. Visualizing Performance (Charts)
+- **Total events.** Telemetry events in the window, split into critical and
+  warning.
+- **Open alerts.** Unresolved alerts in the window, split into critical and
+  warning. The project **status** is `critical` if any open alert is critical,
+  `warning` if any is a warning, and `stable` otherwise.
+- **Tokens at stake.** The sum of `saved_tokens` over open alerts. For a
+  **drift** alert it's the estimated tokens a mitigation would save
+  (`prompt_tokens × savings ratio`). For an **agent** alert it's the tokens
+  already spent on the blocked task's failed or redundant attempts. These are
+  estimates, not provider invoices.
+- **Mean retrieval score / mean response quality.** Averages from 0 to 1 over
+  the window. Higher is better. The card shows the policy floor.
+- **Mean risk score.** The average of each event's server-computed risk (see
+  [scoring](#how-events-are-scored)).
+- **Agent Task Diagnosis.** The most urgent agent problem in one sentence: the
+  blocking tool, the wasted tokens for that task, and the recommendation.
+  **Wasted tokens (all tasks)** adds up every task in the window, so it can be
+  larger than the figure in the sentence.
+- **Telemetry & Drift Timeline.** Up to the latest 500 events, oldest to newest.
+  Prompt tokens use the left axis. Retrieval score and response quality use the
+  right axis (0–1). A dashed line marks the prompt-token limit.
+- **Drift Risk Breakdown.** The share of events in the window that broke each
+  policy rule. The threshold is shown beside each rule.
+- **Top Root Causes.** The most frequent causes among warning and critical
+  events.
+- **Active Alerts.** The five newest open alerts.
 
-We use visual charts to make it easy to spot trends and issues at a glance.
+## Agent Diagnosis
 
-* **Telemetry & Drift Timeline:** This line graph shows you if things are changing over time. For example, you might see that the AI is suddenly reading a lot more text (using more tokens), but the quality of its answers is dropping. This is a clear sign something is wrong.
-* **Drift Risk Breakdown (Radar Chart):** This chart highlights where your biggest risks are. It flags issues like:
-    * **Prompt Drift:** The instructions given to the AI are getting too long or changing unexpectedly.
-    * **Quality Loss:** The AI's answers are getting worse.
-    * **Context Bloat:** The AI is being forced to read way too much information at once.
-* **Context Length Distribution:** A visual representation of how much information (context) the AI is reading for each task. If it's constantly reading huge amounts of text, it might get confused or cost more money.
-* **Tokens vs Quality Correlation:** Does spending more money actually make the AI smarter? This chart compares how much you are spending (tokens) against the quality of the AI's answers. If you are spending a lot but quality is low, it's time to investigate.
+This view covers tasks reported through agent events (see
+[agent-integration.md](agent-integration.md)).
 
----
+- **Blocked tasks** have an unbroken run of failures of one tool at or above the
+  project's *blocked after failures* setting (3 by default).
+- **Failing tasks** have a shorter unbroken run.
+- **Repeated attempts** are failures that came after an earlier failure in the
+  same run: the agent retrying something that just failed.
+- **Redundant attempts** are successful calls that repeated input which had
+  already succeeded in the same task.
+- **Wasted tokens** are the tokens spent on failed attempts plus redundant ones.
 
-## 3. Alerts & Warnings
+The tasks table lists every task, most urgent first. A task's status is
+**Blocked**, **Failing**, **Recovered** (it failed, but the same tool later
+succeeded), or **Healthy**. Select a task to open its detail panel. It shows the
+diagnosis, the recommendation, and every attempt in order, with tool, status,
+error, tokens, and duration.
 
-DriftGuard acts like an alarm system for your AI. It categorizes its observations into three levels:
+A blocked task also creates an **agent** alert. The alert keeps its wasted-token
+count current while the task stays blocked, and resolves itself when the task
+recovers.
 
-* 🟢 **Stable:** Everything is running smoothly. Relax!
-* 🟡 **Warning:** Something looks a little off. You should probably check it out before it becomes a bigger issue or starts costing you money.
-* 🔴 **Critical:** The AI is making significant mistakes, wasting a lot of money, or behaving way outside its normal boundaries. You need to investigate this right away.
+## Events
 
----
+This view is the raw telemetry, newest first, 100 rows at a time. **Load more**
+fetches older rows, and the search box filters the rows already loaded. Each row
+shows the server's scoring: severity, risk, and root cause. Select a row to see
+every field, including any `metadata` your app attached.
 
-## 4. AI Agent Tracking (Why did the AI get stuck?)
+## Alerts
 
-Sometimes, AI agents are asked to perform complex tasks (like writing code or searching the web). If they get stuck, they might try the same failing action over and over again, wasting time and money.
+This view has **Open**, **Resolved**, and **All** tabs, plus a severity filter.
+Each alert shows a severity, a source, and the tokens at stake. There are three
+sources:
 
-The dashboard includes an **Agent Task Diagnosis** section that shows you:
-* Exactly what task the AI was trying to do.
-* Which tool it was trying to use when it failed.
-* How many times it repeated the same mistake.
-* The error message explaining why it failed.
+- **drift**: a critical telemetry event. Within the cooldown (15 minutes by
+  default), repeats of the same root cause don't create new alerts.
+- **agent**: a blocked task. Resolves itself on recovery.
+- **manual**: created here with **New alert**, or through the API.
 
-This helps you quickly figure out why your AI is stuck and stop it from wasting more resources.
+**Resolve** and **Reopen** change an alert's state for everyone on the project.
+Resolved alerts stop counting toward the project status and the badge. The
+retention job eventually removes them. Open alerts are never pruned.
 
----
+## Analytics
 
-## 5. Controls at the Top (Header)
+These charts cover up to the latest 500 events:
 
-* **Project:** If you have multiple AI apps, you can switch between them here.
-* **Environment:** Lets you see data for different versions of your app (e.g., the "Testing" version vs. the "Live/Production" version).
-* **Refresh:** Grabs the absolute latest data so you are always looking at real-time information.
+- **context length over time**, with the limit marked
+- **prompt tokens vs. response quality**, one point per event, shaped and
+  coloured by severity. Points moving right and down mean more context is
+  costing tokens without improving answers. Treat that as a clue, not proof.
+- **retrieval score over time**, with the floor marked
+- **severity distribution** for the window
+
+## Policy
+
+These are the project's thresholds. Saving changes how new events are scored and
+how the agent diagnosis runs, on the server and in any SDK that calls
+`fetch_policy()`. Events already stored keep their original scores.
+
+| Setting | Default | Meaning |
+| --- | ---: | --- |
+| Prompt token limit | 3000 | Rule broken when `prompt_tokens` is above it. |
+| Context length limit | 4000 | Rule broken when `context_length` is above it. |
+| Retrieval score floor | 0.50 | Rule broken when `retrieval_score` is below it. |
+| Response quality floor | 0.80 | Rule broken when `response_quality` is below it. |
+| Blocked after failures | 3 | Consecutive failures of one tool before a task counts as blocked. |
+| Retry window (minutes) | 60 | Failures further apart than this start a new run. 0 turns the window off. |
+
+**Reset** discards unsaved edits.
+
+## SDK Integration
+
+This view has copyable Python snippets for the current project and server URL:
+install, telemetry, agent events, the decorator, and MCP. The API key appears
+only as its prefix (`dg_live_ab12…`). Use the key you saved when you created the
+project, or rotate a new one in Project Settings.
+
+## Project Settings
+
+- **Rotate API key** issues a new key, shown once. The old key stops working
+  immediately, so update your applications.
+- **Delete project** permanently removes the project and all of its telemetry,
+  alerts, and policy. To confirm, you type the project ID.
+
+## How events are scored
+
+The server scores every event against the project policy. Each broken rule adds
+risk:
+
+| Rule | Risk |
+| --- | ---: |
+| Prompt token limit | 0.25 |
+| Retrieval score floor | 0.35 |
+| Context length limit | 0.20 |
+| Response quality floor | 0.20 |
+
+The total is capped at 1.0. Below 0.4 is **stable**, 0.4 up to 0.75 is
+**warning**, and 0.75 or above is **critical**. A metric you didn't send never
+breaks a rule. The recommended actions are:
+
+- `compress_prompt_context` for prompt or context inflation
+- `trim_retrieval_results` for retrieval degradation
+- `fallback_to_lower_cost_model` for a quality drop
+
+These are **recommendations** for your application. DriftGuard doesn't change
+your prompts or providers.
+
+## Metric definitions
+
+- `prompt_tokens`: tokens in the model request's input.
+- `context_length`: the total context supplied: conversation history, retrieved
+  documents, and the system prompt.
+- `retrieval_score`: 0–1 relevance from your RAG pipeline. Send `1.0`, or leave
+  it out, if you don't use retrieval.
+- `response_quality`: 0–1 from your evaluator, validation checks, or user
+  feedback.
+- `environment`: `prod`, `staging`, `dev`, or `test`.
