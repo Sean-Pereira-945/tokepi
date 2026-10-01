@@ -93,3 +93,9 @@ driftguard/server/static/
 .frontend_source/
 
 
+
+# Claude Code: personal settings, plus the DriftGuard hook key, state and log
+.claude/settings.local.json
+.claude/driftguard.json
+.claude/driftguard-state/
+.claude/driftguard-hook.log
