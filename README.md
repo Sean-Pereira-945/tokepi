@@ -14,6 +14,9 @@ quality.
 - **Agent diagnosis.** Per-task status (blocked, failing, recovered, healthy),
   the blocking tool, repeated and redundant attempts, wasted tokens, and advice
   based on the error.
+- **Activity logs.** A searchable, live history of every tool call, model call,
+  prompt and session, with CSV/JSON export. Inputs and outputs are stored only
+  if you opt in per project.
 - **Drift scoring.** Four normalized metrics are checked against per-project
   thresholds and turned into a severity, a root cause, and a recommended
   mitigation.
@@ -21,17 +24,33 @@ quality.
   alerts. Agent alerts resolve themselves when the task recovers. Alerts are
   pushed live to the dashboard, Slack, or any webhook.
 - **Drop-in adapters.** A `@driftguard_tool` decorator, MCP session
-  instrumentation, and token extraction from OpenAI, Anthropic, and Gemini
-  responses.
+  instrumentation, token extraction from OpenAI, Anthropic, and Gemini
+  responses, and a no-code [Claude Code hook](integrations/claude_code/README.md).
 - **Self-hostable.** A FastAPI server, a React dashboard, and SQLite or
   PostgreSQL, with Redis when you scale out. One `docker compose up`.
+
+![DriftGuard architecture](docs/images/architecture.svg)
 
 DriftGuard observes what your code reports, and it recommends actions rather
 than taking them. It doesn't intercept closed agents such as GitHub Copilot, and
 it never changes prompts or providers. See
 [what it can't observe](docs/agent-integration.md#what-driftguard-cannot-observe).
 
-## Quickstart
+## Start here
+
+| I want to… | Do this |
+| --- | --- |
+| See it running in two minutes (Windows) | Double-click **`demo.bat`**. Sign in as `demo@driftguard.local` / `driftguard-demo`. |
+| Run it from this repo | `pip install -e ".[server]"`, `cd frontend && npm ci && npm run build`, then `driftguard-server`. Details in [Getting started](docs/quickstart.md#b-from-source-windows-macos-linux). |
+| Fill the dashboard with sample data | `python examples/seed_showcase.py --api-key dg_live_... --project-id showcase` |
+| Watch my own Claude Code sessions | [Claude Code hook](integrations/claude_code/README.md) |
+| Understand how it works | [How DriftGuard works](docs/concepts.md), then [Architecture](docs/architecture.md) |
+
+![The Overview view, with sample data](docs/images/dashboard-overview.png)
+
+Every view is described in the [dashboard guide](docs/dashboard.md).
+
+## Quickstart (SDK)
 
 ```bash
 pip install "driftguard[server]"
@@ -72,12 +91,13 @@ walkthrough, including Docker, is in [docs/quickstart.md](docs/quickstart.md).
 
 | | |
 | --- | --- |
-| [Quickstart](docs/quickstart.md) | Server, first project, first events, in ten minutes |
-| [Giving a demo](docs/demo.md) | A five-minute live demo script with talking points |
+| [Getting started](docs/quickstart.md) | Three ways to run it, four ways to send data, troubleshooting |
+| [How DriftGuard works](docs/concepts.md) | Plain-language concepts, scoring and diagnosis with worked examples |
+| [Giving a demo](docs/demo.md) | A five-minute live demo, a presentation outline, talking points |
 | [Agent integration](docs/agent-integration.md) | Decorator, MCP, raw events, and what can't be observed |
-| [Dashboard guide](docs/dashboard.md) | What every view and metric means |
+| [Dashboard guide](docs/dashboard.md) | Every view, card and column, with screenshots |
 | [API reference](docs/api.md) | Every endpoint, with real request and response bodies |
-| [Architecture](docs/architecture.md) | Components, scoring and diagnosis algorithms, data model, security |
+| [Architecture](docs/architecture.md) | Diagrams, components, request flows, algorithms, data model, security |
 | [Configuration](docs/configuration.md) | Environment variables and policy settings |
 | [Deployment](docs/deployment.md) | Docker Compose, TLS, scaling, backups, upgrading from 0.3 |
 | [Development](docs/development.md) | Repo layout, tests on SQLite/Postgres/Redis, CI, releasing |
@@ -90,6 +110,7 @@ walkthrough, including Docker, is in [docs/quickstart.md](docs/quickstart.md).
 driftguard/     the Python package: SDK, adapters, and driftguard.server
 frontend/       dashboard source (React + Vite); builds into driftguard/server/static
 research/       Phase 1 synthetic drift research prototypes
+integrations/   no-code integrations, starting with Claude Code hooks
 tests/          SDK and server test suite
 examples/       runnable scripts, including the live demo (demo.bat runs it on Windows)
 docs/           documentation

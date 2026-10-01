@@ -18,14 +18,16 @@ path has to emit the events: the decorator, the MCP adapter, or your own code.
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `task_id` | yes | Stable ID of the job, e.g. `fix-tests` or a ticket ID. Events are grouped by it. |
-| `tool_name` | yes | The tool called: `terminal`, `browser`, `search`, an MCP tool name, and so on. |
-| `status` | yes | `success` or `failed`. `timeout` and `error` also count as failures. |
+| `kind` | | `tool_call` (the default), `llm_call`, `prompt`, `response`, `session_start` or `session_end`. Only tool calls feed the diagnosis; every kind appears in Logs. |
+| `tool_name` | tool calls | The tool called: `terminal`, `browser`, `search`, an MCP tool name, and so on. |
+| `status` | tool calls | `success` or `failed`. `timeout` and `error` also count as failures. |
 | `trace_id` | | One run of the task. The adapters generate it. |
 | `attempt` | | Nth call of this tool in the run. The adapters fill it in. |
 | `error_type`, `error_message` | | Exception class or error code, and the message. Messages are scrubbed for secrets and cut to 4,000 characters. |
 | `input_hash` | | Fingerprint of the tool arguments. A successful call whose hash already succeeded in the task counts as **redundant**. |
 | `prompt_tokens`, `completion_tokens`, `total_tokens` | | LLM tokens spent on this attempt. |
 | `duration_ms`, `model`, `agent_name`, `environment`, `occurred_at` | | Context. `occurred_at` defaults to the capture time. |
+| `input`, `output` | | Content previews, such as tool arguments and results or prompt text. Sent only with `capture_content=True`, and stored only if the project has content storage on. See [Storing inputs and outputs](#storing-inputs-and-outputs). |
 
 ## Option 1: Python agents (decorator)
 
@@ -65,6 +67,43 @@ with AgentContext(client, task_id="fix-tests", auto_sync=True) as ctx:
   `client.sync_agent_events_async()` periodically.
 - Inside a context, `ctx.record_tool_call(tool_name, status, ...)` records a call
   that isn't wrapped by the decorator.
+- `ctx.record_activity(kind, input=..., output=..., **fields)` logs non-tool
+  activity for the task, so Logs tells the whole story:
+
+  ```python
+  with AgentContext(client, task_id="fix-tests") as ctx:
+      ctx.record_activity("prompt", input=user_request)
+      response = llm.messages.create(...)
+      ctx.record_activity("llm_call", model="claude-opus", status="success",
+                          prompt_tokens=response.usage.input_tokens)
+      run_tests("tests/")
+      ctx.record_activity("response", output=final_answer)
+  ```
+
+## Storing inputs and outputs
+
+By default, DriftGuard records what happened: which tool ran, whether it
+worked, the error, tokens and timing. It doesn't record the content: the
+command, the file contents, the tool's output, or the prompt. Content is useful
+in Logs, but it can contain code and data, so both sides have to opt in:
+
+1. **The project** stores content only when content storage is on in Project
+   Settings (or via `PATCH /projects/{id}` with `{"capture_content": true}`).
+   Otherwise the server drops it.
+2. **The SDK** sends content only when the client is created with
+   `capture_content=True`:
+
+   ```python
+   client = DriftGuardClient(api_key="dg_live_...", project_id="coding-agent",
+                             base_url="http://localhost:8000", capture_content=True)
+   ```
+
+With both on, decorated tools send their arguments as `input` and their return
+value as `output`. The MCP adapter sends the tool arguments and the text of the
+result. `record_activity` sends what you pass it. Non-string values are
+serialised to JSON. The SDK and the server both cut each field to 2,000
+characters, and the server redacts secrets, emails and card numbers before
+storing it.
 
 ## Option 2: MCP tools
 
@@ -105,6 +144,19 @@ curl -X POST https://driftguard.example.com/agent-events/coding-agent/batch \
 ```
 
 The field reference is in [api.md](api.md#post-agent-eventsid).
+
+## Option 4: Claude Code (hooks, no code)
+
+Claude Code's hooks can report a whole session with no code changes. A small
+script, [`integrations/claude_code/driftguard_hook.py`](../integrations/claude_code/driftguard_hook.py),
+handles it:
+- Each prompt becomes a task, and each tool call is a `tool_call` event of that
+  task.
+- Failed commands and edits show up in Agent Diagnosis.
+- Prompts and turn endings appear in Logs.
+
+Setup is a config file with the project key plus a hooks entry. See
+[integrations/claude_code/README.md](../integrations/claude_code/README.md).
 
 ## Reading the diagnosis
 

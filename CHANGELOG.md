@@ -4,6 +4,90 @@ All notable changes to DriftGuard are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/) (pre-1.0: minor versions may break).
 
+## [Unreleased]
+
+### Added
+- **Logs view** in the dashboard: the full history of agent activity, newest
+  first.
+  - Server-side search, plus kind and outcome filters.
+  - Live updates, with a pause button.
+  - A detail drawer, including "show only this task".
+  - CSV and JSON export.
+- **Agent event kinds.** `kind` accepts `tool_call` (the default), `llm_call`,
+  `prompt`, `response`, `session_start` and `session_end`. Non-tool kinds don't
+  need `tool_name` or `status`, and are ignored by the diagnosis and agent alerts.
+- **Opt-in content storage.**
+  - Agent events accept `input` and `output` previews.
+  - The server stores them only when the project's new `capture_content`
+    setting is on. It's off by default.
+  - Stored content is scrubbed, cut to 2,000 characters, and pruned by retention.
+- `PATCH /projects/{id}` changes a project's name or `capture_content`.
+- **Overview agent activity.** `GET /projects/{id}/summary` gains
+  `agent_activity`, computed from the same rows as Logs: tool calls, failures,
+  failure rate, tasks, finished turns, tokens used and average tool duration. The
+  Overview shows these as a row of cards. Retrieval and quality cards say "Not
+  reported by this source" when the telemetry has no such score.
+- `GET /projects/{id}/agent-events` gains `kind`, `tool_name`, `agent_name`,
+  `outcome`, `q` (search) and `before_id` (paging).
+- `GET /projects/{id}/agent-events/export?format=csv|json` downloads up to 10,000
+  filtered events.
+- The WebSocket sends `{"type": "activity", "count": n}` after agent events are
+  ingested. Agent Diagnosis and Logs use it to refresh live.
+- **SDK.**
+  - `DriftGuardClient(capture_content=True)` sends content previews. Without it,
+    `input` and `output` are removed before events are queued.
+  - With it on, `@driftguard_tool` and the MCP adapter send tool arguments and
+    results.
+  - `AgentContext.record_activity(kind, ...)` logs prompts, model calls and
+    other non-tool activity.
+
+- `examples/seed_showcase.py` fills a project with a week of varied sample data
+  for every dashboard view, using only its API key.
+- **Claude Code integration** (`integrations/claude_code/`): a hook script
+  that reports a Claude Code session to DriftGuard with no code changes.
+  - Each prompt becomes a task, and each tool call a `tool_call` event.
+  - Failures come from `PostToolUseFailure`.
+  - Prompts, turn endings and session start/end appear in Logs.
+  - Tool calls get their duration, model and tokens from the session
+    transcript. Cached context isn't counted, and each model call is counted
+    once. A later tool call from the same model call shows 0.
+  - Each turn is reported once, when Claude stops, as one `response`. It holds
+    the prompt, the answer, the turn's duration and the tokens of all its model
+    calls.
+  - Session start and end are opt-in (`"session_events": true`).
+  - Each finished turn sends LLM telemetry, one event per model call, with new
+    input tokens and the full context size. Turn it off with
+    `"send_telemetry": false`.
+  - A turn whose start isn't in the hook state falls back to the last prompt you
+    typed. It skips messages Claude Code inserts, and ignores starts older than
+    6 hours.
+  - It uses only the standard library, gives up after 2 seconds, never fails
+    Claude Code, and logs problems to `.claude/driftguard-hook.log`.
+
+### Changed
+- The dashboard's Refresh button also reloads the project list, and the list
+  reloads when you return to the tab. A project created through the API or a
+  script no longer needs a page reload to appear.
+- Existing databases gain `projects.capture_content` and
+  `agent_events.kind`/`input_text`/`output_text` automatically on startup.
+  Existing agent events become `tool_call` events.
+
+### Documentation
+- **Getting started** (`docs/quickstart.md`) rewritten: three ways to run it
+  (`demo.bat`, from source, Docker), four ways to send data (sample data, live
+  demo, Claude Code, SDK), and a troubleshooting table.
+- New **How DriftGuard works** (`docs/concepts.md`): the problem, the two kinds
+  of events, a glossary, scoring and diagnosis with worked examples, and a
+  60-second summary.
+- **Architecture diagram** as an image (`docs/images/architecture.svg`, plus a
+  PNG for slides), and new diagrams of the dashboard and of the telemetry, agent
+  event and Claude Code hook flows. Also a server module table and a
+  view-to-endpoint table.
+- **Dashboard guide** rewritten with screenshots and a table for every card and
+  column, plus a map of which source fills which view.
+- The demo guide gains a 15-minute presentation outline. The README gains a
+  "Start here" table, the diagram and a screenshot.
+
 ## [0.4.0] - unreleased
 
 A rebuild of the foundation. v0.3 described several features as done that

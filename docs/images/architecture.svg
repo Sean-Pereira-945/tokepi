@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" width="1280" height="760" font-family="Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif">
+  <title>DriftGuard architecture</title>
+  <desc>Data sources send events with a project API key to the DriftGuard server, which scores, diagnoses and stores them, raises alerts, and serves and pushes updates to the dashboard.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .panel-title { font-size: 15px; font-weight: 700; letter-spacing: .06em; }
+      .box-title { font-size: 15px; font-weight: 600; fill: #0f172a; }
+      .box-sub { font-size: 12px; fill: #475569; }
+      .label { font-size: 12px; fill: #334155; font-weight: 600; }
+      .line { stroke: #475569; stroke-width: 1.6; fill: none; }
+      .dash { stroke: #475569; stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="760" fill="#ffffff"/>
+  <text x="640" y="42" text-anchor="middle" font-size="24" font-weight="700" fill="#0f172a">DriftGuard architecture</text>
+
+  <!-- ===== Data sources ===== -->
+  <rect x="30" y="76" width="260" height="474" rx="14" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="160" y="104" text-anchor="middle" class="panel-title" fill="#1d4ed8">DATA SOURCES</text>
+
+  <rect x="50" y="122" width="220" height="74" rx="10" fill="#fff" stroke="#3b82f6"/>
+  <text x="160" y="152" text-anchor="middle" class="box-title">Python SDK</text>
+  <text x="160" y="172" text-anchor="middle" class="box-sub">DriftGuardClient · @driftguard_tool</text>
+  <text x="160" y="187" text-anchor="middle" class="box-sub">MCP adapter · usage_from_response</text>
+
+  <rect x="50" y="214" width="220" height="74" rx="10" fill="#fff" stroke="#3b82f6"/>
+  <text x="160" y="244" text-anchor="middle" class="box-title">Claude Code hook</text>
+  <text x="160" y="264" text-anchor="middle" class="box-sub">prompts · tool calls · answers</text>
+  <text x="160" y="279" text-anchor="middle" class="box-sub">no code changes</text>
+
+  <rect x="50" y="306" width="220" height="74" rx="10" fill="#fff" stroke="#3b82f6"/>
+  <text x="160" y="336" text-anchor="middle" class="box-title">Any language</text>
+  <text x="160" y="356" text-anchor="middle" class="box-sub">raw HTTP + JSON</text>
+
+  <rect x="50" y="398" width="220" height="74" rx="10" fill="#fff" stroke="#3b82f6"/>
+  <text x="160" y="428" text-anchor="middle" class="box-title">Example scripts</text>
+  <text x="160" y="448" text-anchor="middle" class="box-sub">live_demo · seed_showcase</text>
+
+  <text x="160" y="506" text-anchor="middle" class="box-sub">Two event types:</text>
+  <text x="160" y="524" text-anchor="middle" class="box-sub">telemetry (one per LLM call)</text>
+  <text x="160" y="540" text-anchor="middle" class="box-sub">agent events (tool calls, prompts…)</text>
+
+  <!-- source bus -->
+  <path class="line" d="M270 159 H322"/>
+  <path class="line" d="M270 251 H322"/>
+  <path class="line" d="M270 343 H322"/>
+  <path class="line" d="M270 435 H322"/>
+  <path class="line" d="M322 159 V435"/>
+  <path class="line" d="M322 157 H388" marker-end="url(#arrow)"/>
+  <text x="314" y="297" text-anchor="middle" class="label" transform="rotate(-90 314 297)">X-API-Key</text>
+
+  <!-- ===== Server ===== -->
+  <rect x="360" y="76" width="540" height="474" rx="14" fill="#ecfeff" stroke="#67e8f9"/>
+  <text x="630" y="104" text-anchor="middle" class="panel-title" fill="#0e7490">DRIFTGUARD SERVER (FASTAPI)</text>
+
+  <rect x="390" y="122" width="480" height="70" rx="10" fill="#fff" stroke="#06b6d4"/>
+  <text x="630" y="151" text-anchor="middle" class="box-title">Ingestion  /events · /agent-events</text>
+  <text x="630" y="172" text-anchor="middle" class="box-sub">check API key · rate limit · scrub secrets &amp; PII · store in one transaction</text>
+
+  <rect x="390" y="232" width="230" height="70" rx="10" fill="#fff" stroke="#06b6d4"/>
+  <text x="505" y="261" text-anchor="middle" class="box-title">Drift scoring</text>
+  <text x="505" y="282" text-anchor="middle" class="box-sub">risk · severity · root cause</text>
+
+  <rect x="640" y="232" width="230" height="70" rx="10" fill="#fff" stroke="#06b6d4"/>
+  <text x="755" y="261" text-anchor="middle" class="box-title">Agent diagnosis</text>
+  <text x="755" y="282" text-anchor="middle" class="box-sub">blocked · failing · wasted tokens</text>
+
+  <rect x="390" y="342" width="230" height="70" rx="10" fill="#fff7ed" stroke="#f97316"/>
+  <text x="505" y="371" text-anchor="middle" class="box-title">Alert engine</text>
+  <text x="505" y="392" text-anchor="middle" class="box-sub">raise · update · auto-resolve</text>
+
+  <rect x="640" y="342" width="230" height="70" rx="10" fill="#fff" stroke="#06b6d4"/>
+  <text x="755" y="371" text-anchor="middle" class="box-title">Dashboard API</text>
+  <text x="755" y="392" text-anchor="middle" class="box-sub">summary · events · logs · diagnosis</text>
+
+  <rect x="390" y="452" width="140" height="70" rx="10" fill="#fff" stroke="#06b6d4"/>
+  <text x="460" y="481" text-anchor="middle" class="box-title">Retention</text>
+  <text x="460" y="502" text-anchor="middle" class="box-sub">prune after 30 days</text>
+
+  <rect x="545" y="452" width="160" height="70" rx="10" fill="#fff" stroke="#06b6d4"/>
+  <text x="625" y="481" text-anchor="middle" class="box-title">Notifier</text>
+  <text x="625" y="502" text-anchor="middle" class="box-sub">Slack · webhook</text>
+
+  <rect x="720" y="452" width="150" height="70" rx="10" fill="#fff" stroke="#06b6d4"/>
+  <text x="795" y="481" text-anchor="middle" class="box-title">Realtime</text>
+  <text x="795" y="502" text-anchor="middle" class="box-sub">WebSocket</text>
+
+  <!-- server internal arrows -->
+  <path class="line" d="M505 192 V230" marker-end="url(#arrow)"/>
+  <path class="line" d="M755 192 V230" marker-end="url(#arrow)"/>
+  <text x="513" y="216" class="box-sub">telemetry</text>
+  <text x="763" y="216" class="box-sub">agent events</text>
+  <path class="line" d="M505 302 V340" marker-end="url(#arrow)"/>
+  <path class="line" d="M700 302 L590 340" marker-end="url(#arrow)"/>
+  <path class="line" d="M590 412 L615 450" marker-end="url(#arrow)"/>
+  <path class="line" d="M610 405 L740 450" marker-end="url(#arrow)"/>
+  <text x="636" y="442" class="box-sub">alert</text>
+  <path class="line" d="M880 157 H890 V487 H872" marker-end="url(#arrow)"/>
+  <text x="880" y="266" text-anchor="middle" class="box-sub" transform="rotate(90 880 266)">activity ping</text>
+
+  <!-- ===== Storage ===== -->
+  <g>
+    <path d="M440 612 a110 16 0 0 1 220 0 v72 a110 16 0 0 1 -220 0 z" fill="#f1f5f9" stroke="#64748b"/>
+    <ellipse cx="550" cy="612" rx="110" ry="16" fill="#e2e8f0" stroke="#64748b"/>
+    <text x="550" y="660" text-anchor="middle" class="box-title">SQLite or PostgreSQL</text>
+    <text x="550" y="680" text-anchor="middle" class="box-sub">events · agent events · alerts · policy</text>
+  </g>
+  <g>
+    <path d="M720 612 a80 14 0 0 1 160 0 v62 a80 14 0 0 1 -160 0 z" fill="#fef2f2" stroke="#ef4444"/>
+    <ellipse cx="800" cy="612" rx="80" ry="14" fill="#fee2e2" stroke="#ef4444"/>
+    <text x="800" y="654" text-anchor="middle" class="box-title">Redis (optional)</text>
+    <text x="800" y="672" text-anchor="middle" class="box-sub">shared limits · pub/sub</text>
+  </g>
+  <path class="line" d="M550 550 V594" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="560" y="578" class="label">SQL</text>
+  <path class="dash" d="M800 524 V596" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="810" y="572" class="label">multi-worker</text>
+
+  <!-- ===== Dashboard ===== -->
+  <rect x="980" y="76" width="270" height="474" rx="14" fill="#f5f3ff" stroke="#c4b5fd"/>
+  <text x="1115" y="104" text-anchor="middle" class="panel-title" fill="#6d28d9">DASHBOARD (REACT)</text>
+  <g font-size="14" fill="#0f172a">
+    <rect x="1000" y="122" width="230" height="36" rx="8" fill="#fff" stroke="#8b5cf6"/><text x="1115" y="145" text-anchor="middle">Overview</text>
+    <rect x="1000" y="166" width="230" height="36" rx="8" fill="#fff" stroke="#8b5cf6"/><text x="1115" y="189" text-anchor="middle">Agent Diagnosis</text>
+    <rect x="1000" y="210" width="230" height="36" rx="8" fill="#fff" stroke="#8b5cf6"/><text x="1115" y="233" text-anchor="middle">Logs</text>
+    <rect x="1000" y="254" width="230" height="36" rx="8" fill="#fff" stroke="#8b5cf6"/><text x="1115" y="277" text-anchor="middle">Events</text>
+    <rect x="1000" y="298" width="230" height="36" rx="8" fill="#fff" stroke="#8b5cf6"/><text x="1115" y="321" text-anchor="middle">Alerts</text>
+    <rect x="1000" y="342" width="230" height="36" rx="8" fill="#fff" stroke="#8b5cf6"/><text x="1115" y="365" text-anchor="middle">Analytics</text>
+    <rect x="1000" y="386" width="230" height="36" rx="8" fill="#fff" stroke="#8b5cf6"/><text x="1115" y="409" text-anchor="middle">Policy</text>
+    <rect x="1000" y="430" width="230" height="36" rx="8" fill="#fff" stroke="#8b5cf6"/><text x="1115" y="453" text-anchor="middle">SDK Integration</text>
+    <rect x="1000" y="474" width="230" height="36" rx="8" fill="#fff" stroke="#8b5cf6"/><text x="1115" y="497" text-anchor="middle">Project Settings</text>
+  </g>
+  <text x="1115" y="534" text-anchor="middle" class="box-sub">served by the same server</text>
+
+  <path class="line" d="M978 377 H872" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="925" y="368" text-anchor="middle" class="label">HTTPS</text>
+  <text x="925" y="396" text-anchor="middle" class="box-sub">session</text>
+  <path class="line" d="M870 500 H978" marker-end="url(#arrow)"/>
+  <text x="935" y="492" text-anchor="middle" class="label">push</text>
+
+  <!-- ===== Notifications ===== -->
+  <rect x="980" y="604" width="270" height="70" rx="10" fill="#fff7ed" stroke="#f97316"/>
+  <text x="1115" y="633" text-anchor="middle" class="box-title">Slack / webhook</text>
+  <text x="1115" y="654" text-anchor="middle" class="box-sub">critical alerts, sent in the background</text>
+  <path class="line" d="M625 522 V540 H940 V639 H978" marker-end="url(#arrow)"/>
+
+  <!-- legend -->
+  <g font-size="12" fill="#475569">
+    <line x1="40" y1="726" x2="80" y2="726" class="line" marker-end="url(#arrow)"/><text x="88" y="730">data flow</text>
+    <line x1="170" y1="726" x2="210" y2="726" class="dash"/><text x="218" y="730">optional</text>
+    <rect x="300" y="718" width="16" height="16" rx="3" fill="#fff7ed" stroke="#f97316"/><text x="324" y="730">alerting</text>
+  </g>
+</svg>

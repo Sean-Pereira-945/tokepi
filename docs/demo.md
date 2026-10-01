@@ -66,6 +66,51 @@ straight through, `--base-url` if the server isn't on port 8000, and
 `--project` if another account already owns the `live-demo` ID (project IDs
 are unique across the server).
 
+## A full dashboard to browse
+
+The live script tells a short story. For a dashboard that's full in every view,
+create an empty project, copy its API key, and run:
+
+```bash
+python examples/seed_showcase.py --api-key dg_live_... --project-id showcase
+```
+
+It adds a week of sample data:
+- About 420 LLM requests across prod, staging and dev, from four models, with
+  three drift episodes that build from warnings to critical.
+- Five agents, with tasks that are blocked, failing, recovered and healthy, and
+  calls that repeat input that already succeeded (redundant).
+- Open and resolved alerts.
+- Logs where every row is filled in. Each tool call has its command, output or
+  error, duration and tokens. Each finished task ends with a response row
+  holding the prompt, the answer, the task's duration and its tokens.
+
+Turn on content storage for the project first if you want Logs to show inputs
+and outputs. Set the time range to **Last 7 days** to see all of it.
+
+## Presenting the project (10–15 minutes)
+
+A running order that works for a class or a review. Open the dashboard before
+you start, with the **Showcase** project loaded and **Last 7 days** selected.
+
+| Min | Show | Say |
+| ---: | --- | --- |
+| 0–2 | [The architecture diagram](images/architecture.png) | The problem (quiet drift, stuck agents), and the three parts: sources, server, dashboard. |
+| 2–4 | **Overview** | Status, open alerts, tokens at stake, and the agent activity row. Every number is a query over stored events. |
+| 4–6 | **Agent Diagnosis** | A blocked task: which tool, how many tries, the wasted tokens and the advice. Open a task to show each attempt. |
+| 6–7 | **Alerts** | Agent alerts resolve themselves when the task recovers. Drift alerts carry a root cause and a fix. |
+| 7–9 | **Events** and **Analytics** | How one LLM call is scored: rules → risk → severity ([worked examples](concepts.md#how-a-telemetry-event-is-scored)). |
+| 9–11 | **Logs**, switching to the **Claude Code** project | This is real data: the Claude Code session that built the project, with each command, its duration and its tokens. |
+| 11–13 | Live: `demo.bat` or `live_demo.py` | Play steps 2–4. Show a drift alert popping up, then an agent blocking and recovering live. |
+| 13–15 | Questions | Limits: it sees only what's reported, it recommends rather than acts, and quality needs an evaluator. |
+
+For the explanations themselves, use [How DriftGuard works](concepts.md),
+which ends with a 60-second summary you can read out.
+
+**Remote audience:** share your screen (simplest and safest). Exposing your
+local server to the internet means anyone with the link can reach the sign-in
+page, so don't do it with real data in it.
+
 ## Talking points
 
 - **The problem:** LLM apps degrade quietly (prompts grow, retrieval gets
@@ -75,8 +120,10 @@ are unique across the server).
   decorator (`@driftguard_tool`) and a context block. Show
   [`examples/live_demo.py`](../examples/live_demo.py): the instrumentation is
   about five lines.
-- **Privacy:** only metrics and tool outcomes are sent, never prompts or
-  model API keys. Secrets and PII in error messages are scrubbed.
+- **Privacy:** by default only metrics and tool outcomes are stored. Prompts,
+  commands and outputs are kept only if a project turns on content storage,
+  and they're scrubbed of secrets and PII first. Model API keys never reach
+  DriftGuard.
 - **Deployment:** it's self-hosted, from a single SQLite process up to Docker
   Compose with PostgreSQL and Redis ([deployment.md](deployment.md)).
 
