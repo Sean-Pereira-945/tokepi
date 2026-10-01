@@ -102,7 +102,8 @@ that key's project.
 
 ```json
 [{"project_id": "coding-agent", "account_id": "acct-…", "name": "Coding Agent",
-  "environment": "prod", "api_key_hint": "dg_live_i4BK", "created_at": "…"}]
+  "environment": "prod", "api_key_hint": "dg_live_i4BK", "capture_content": false,
+  "created_at": "…"}]
 ```
 
 ### `POST /projects` → `201` *(session)*
@@ -115,6 +116,18 @@ Returns `409` if the ID is already taken.
 
 ### `GET /projects/{id}` *(session or key)*
 Returns the project object without the key.
+
+### `PATCH /projects/{id}` *(session)*
+Changes the project's name or content storage. Send either field or both:
+
+```json
+{"name": "Coding Agent", "capture_content": true}
+```
+
+`capture_content` (default `false`) controls whether agent events keep their
+`input` and `output` content. When it's off, the server drops that content on
+ingest. Turning it off doesn't delete content that's already stored; retention
+removes it later. Unknown fields return `422`. Returns the updated project.
 
 ### `DELETE /projects/{id}` → `204` *(session)*
 Deletes the project and all of its events, agent events, alerts, and policy.
@@ -185,7 +198,7 @@ Body `{"events": [ ...1–500 events... ]}`. Returns
 endpoint.
 
 ### `POST /agent-events/{id}`
-Sends one agent tool attempt:
+Sends one agent activity. Most events are tool attempts:
 
 ```json
 {
@@ -205,17 +218,35 @@ Sends one agent tool attempt:
   "total_tokens": 2200,
   "duration_ms": 5120,
   "environment": "prod",
-  "occurred_at": "2026-09-30T04:13:48Z"
+  "occurred_at": "2026-09-30T04:13:48Z",
+  "input": "pytest -q tests/test_auth.py",
+  "output": null
 }
 ```
 
-- `task_id`, `tool_name` and `status` are required.
+- `kind` sets what the event records. It defaults to `tool_call`. The other
+  kinds are `llm_call`, `prompt`, `response`, `session_start` and
+  `session_end`. Only `tool_call` events feed the diagnosis and agent alerts;
+  the other kinds appear only in the activity log.
+- `task_id` is always required. `tool_name` and `status` are also required for
+  `tool_call` events. Other kinds may leave them out; they're then stored as
+  `""` and `"info"`.
 - `status` is lowercased. The diagnosis treats `failed`, `failure`, `error` and
   `timeout` as failures, and `success`, `succeeded`, `ok` and `completed` as
   successes.
 - `error_message` is scrubbed for secrets and PII, and cut to 4,000 characters.
 - `input_hash` is a fingerprint of the tool's arguments. It lets DriftGuard spot
   redundant calls that repeat input which already succeeded.
+- `input` and `output` are content previews, such as tool arguments and
+  results, or prompt and response text. They're stored only when the project
+  has `capture_content` on, and are otherwise dropped silently. Stored content
+  is scrubbed like `error_message` and cut to 2,000 characters each.
+
+A non-tool event can be as small as this:
+
+```json
+{"task_id": "fix-tests", "kind": "prompt", "input": "The login test fails, fix it"}
+```
 
 After each ingest, the server re-diagnoses the affected tasks:
 
@@ -252,6 +283,9 @@ Overview numbers. Filters: `environment`, `severity` (applies to alerts), `time_
   "top_root_causes": [{"root_cause": "prompt context inflation; …", "count": 1}],
   "open_alerts": 2, "critical_alerts": 2, "warning_alerts": 0,
   "saved_tokens": 8940.0,
+  "agent_activity": {"events": 24, "tool_calls": 23, "failed_tool_calls": 0, "failure_rate": 0.0,
+                     "turns": 1, "tasks": 2, "total_tokens": 120600, "avg_tool_duration_ms": 12400.0,
+                     "last_activity": "2026-10-01T07:29:25Z"},
   "last_updated": "2026-09-30T04:13:48.601517Z",
   "policy": {"prompt_token_limit": 3000.0, "…": "…"},
   "filters": {"environment": "all", "severity": "all", "time_range": "all"}
@@ -259,7 +293,15 @@ Overview numbers. Filters: `environment`, `severity` (applies to alerts), `time_
 ```
 
 - `status` reflects **open** alerts only.
-- `averages` values are `null` when there are no events.
+- `averages` values are `null` when there are no events. A metric that no event
+  sent, such as retrieval for Claude Code, is also `null`.
+- `agent_activity` totals the agent events in the window, the same rows as the
+  activity log.
+  - `failure_rate` is failed ÷ all tool calls, and `null` without tool calls.
+  - `turns` counts `response` events, which are finished turns.
+  - `total_tokens` takes each finished task's `response` total, or the sum of
+    its tool calls while the task is unfinished.
+- `last_updated` is the newest of the last event, alert and agent activity.
 - `violation_rates` gives the share of events in the window that broke each rule
   in the current policy.
 - `saved_tokens` adds up the tokens at stake across open alerts. For drift alerts
@@ -306,8 +348,26 @@ Body `{"resolved": true}` resolves the alert. `false` reopens it. Returns the
 alert.
 
 ### `GET /projects/{id}/agent-events` *(session or key)*
-Filters: `environment`, `time_range`, `task_id`, and `limit` (1–1000, default
-200). Results are newest first.
+The activity log, newest first. Every filter is optional, and filters combine:
+
+| Parameter | Matches |
+| --- | --- |
+| `environment`, `time_range` | As in the other dashboard reads |
+| `task_id`, `tool_name`, `agent_name` | Exact value |
+| `kind` | One event kind, e.g. `tool_call` or `prompt` |
+| `outcome` | `failed` (`failed`, `failure`, `error`, `timeout`) or `success` (`success`, `succeeded`, `ok`, `completed`) |
+| `q` | Case-insensitive text in the task, tool, agent, model, error type, error message, input or output (up to 200 characters) |
+| `before_id` | Events older than this ID, for paging |
+| `limit` | 1–1000, default 200 |
+
+Each event includes `kind`, `input` and `output` (`null` when no content is
+stored), plus the fields sent on ingest.
+
+### `GET /projects/{id}/agent-events/export` *(session or key)*
+Downloads the activity log as a file, using the same filters as the list (not
+`before_id` or `limit`). `format` is `csv` (default) or `json`. It returns up
+to 10,000 of the newest matching events, as
+`driftguard-{id}-activity.csv` or `.json`.
 
 ### `GET /projects/{id}/agent-diagnosis` *(session or key)*
 Filters: `environment`, `time_range`. The top-level fields describe the most
@@ -350,6 +410,17 @@ Streams one message whenever an alert is created, resolved, or reopened:
 ```
 
 `action` is `created`, `resolved` (by a user or by task recovery), or `reopened`.
+
+After agent events are ingested, the server also sends a small notice, so open
+dashboards can refresh their activity views:
+
+```json
+{"type": "activity", "count": 3}
+```
+
+The notice doesn't include the events. Fetch them with
+`GET /projects/{id}/agent-events`. Clients should ignore message types they don't
+recognise.
 
 **Authentication.** Pass the session token or project API key as the second
 WebSocket subprotocol. The server replies with the `driftguard` subprotocol.

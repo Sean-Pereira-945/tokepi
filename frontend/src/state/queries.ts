@@ -7,6 +7,8 @@ interface Options {
   key?: string;
   /** Also re-fetch when alerts change (realtime messages, resolve/create). */
   watchAlerts?: boolean;
+  /** Also re-fetch when new agent events arrive. */
+  watchActivity?: boolean;
   enabled?: boolean;
 }
 
@@ -14,13 +16,13 @@ interface Options {
 export function useProjectQuery<T>(
   name: string,
   fetcher: (projectId: string, filters: Filters, signal: AbortSignal) => Promise<T>,
-  { key = '', watchAlerts = false, enabled = true }: Options = {},
+  { key = '', watchAlerts = false, watchActivity = false, enabled = true }: Options = {},
 ): Resource<T> {
-  const { project, filters, refreshKey, alertsKey } = useWorkspace();
+  const { project, filters, refreshKey, alertsKey, activityKey } = useWorkspace();
   const projectId = project?.project_id ?? null;
   return useResource<T>(
     projectId && enabled ? (signal) => fetcher(projectId, filters, signal) : null,
     `${name}|${projectId}|${filters.environment}|${filters.timeRange}|${key}`,
-    refreshKey + (watchAlerts ? alertsKey : 0),
+    refreshKey + (watchAlerts ? alertsKey : 0) + (watchActivity ? activityKey : 0),
   );
 }

@@ -9,7 +9,7 @@ import { Button } from '../components/Button';
 import { MetricCard } from '../components/MetricCard';
 import { PageHeader, Panel } from '../components/Panel';
 import { EmptyState, ErrorState, ResourceView } from '../components/States';
-import { fmtDateTime, fmtInt, fmtRelative, fmtScore, TIME_RANGE_LABELS } from '../lib/format';
+import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtPercent, fmtRelative, fmtScore, TIME_RANGE_LABELS } from '../lib/format';
 import type { ViewId } from '../lib/route';
 import { useProjectQuery } from '../state/queries';
 import { useProject, useWorkspace } from '../state/workspace';
@@ -26,6 +26,9 @@ function MetricRow({ summary, loading }: { summary: Summary | undefined; loading
   const bySev = s?.events_by_severity;
   const below = (value: number | null | undefined, limit: number | undefined) =>
     value !== null && value !== undefined && limit !== undefined && value < limit;
+  // Telemetry exists but this metric was never sent (e.g. Claude Code has no retrieval step).
+  const notReported = (value: number | null | undefined) =>
+    s && s.total_events > 0 && (value === null || value === undefined) ? 'Not reported by this source' : null;
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
@@ -58,14 +61,14 @@ function MetricRow({ summary, loading }: { summary: Summary | undefined; loading
         loading={loading}
         value={fmtScore(avg?.retrieval_score)}
         emphasis={below(avg?.retrieval_score, floor?.retrieval_score_floor) ? 'warning' : 'default'}
-        detail={floor ? `Floor ${fmtScore(floor.retrieval_score_floor)}` : undefined}
+        detail={notReported(avg?.retrieval_score) ?? (floor ? `Floor ${fmtScore(floor.retrieval_score_floor)}` : undefined)}
       />
       <MetricCard
         label="Mean response quality"
         loading={loading}
         value={fmtScore(avg?.response_quality)}
         emphasis={below(avg?.response_quality, floor?.response_quality_floor) ? 'warning' : 'default'}
-        detail={floor ? `Floor ${fmtScore(floor.response_quality_floor)}` : undefined}
+        detail={notReported(avg?.response_quality) ?? (floor ? `Floor ${fmtScore(floor.response_quality_floor)}` : undefined)}
       />
       <MetricCard
         label="Mean risk score"
@@ -83,6 +86,42 @@ function MetricRow({ summary, loading }: { summary: Summary | undefined; loading
         detail="Warning ≥ 0.40 · critical ≥ 0.75"
       />
     </div>
+  );
+}
+
+/** Agent activity from the same events the Logs view lists. Shown once a project has any. */
+function AgentActivityRow({ summary }: { summary: Summary }) {
+  const a = summary.agent_activity;
+  if (!a || a.events === 0) return null;
+  const rate = a.failure_rate;
+  return (
+    <section aria-labelledby="overview-activity" className="space-y-3">
+      <h2 id="overview-activity" className="text-sm font-semibold text-body">
+        Agent activity
+      </h2>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        <MetricCard label="Tool calls" value={fmtInt(a.tool_calls)} detail={`${fmtInt(a.failed_tool_calls)} failed`} />
+        <MetricCard
+          label="Tool failure rate"
+          value={rate === null ? '—' : fmtPercent(rate, 1)}
+          emphasis={rate !== null && rate >= 0.25 ? 'critical' : rate !== null && rate >= 0.1 ? 'warning' : 'default'}
+          detail="Failed ÷ all tool calls"
+        />
+        <MetricCard label="Tasks" value={fmtInt(a.tasks)} detail={`${fmtInt(a.turns)} completed`} />
+        <MetricCard
+          label="Tokens used"
+          value={fmtCompact(a.total_tokens)}
+          unit="tokens"
+          detail="New input + output, by agent tasks"
+        />
+        <MetricCard label="Avg tool duration" value={fmtDuration(a.avg_tool_duration_ms)} detail="Call to result" />
+        <MetricCard
+          label="Agent events"
+          value={fmtInt(a.events)}
+          detail={a.last_activity ? `Last ${fmtRelative(a.last_activity)}` : 'In this window'}
+        />
+      </div>
+    </section>
   );
 }
 
@@ -187,6 +226,8 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
         ) : (
           <MetricRow summary={s} loading={!s && summary.loading} />
         )}
+
+        {s && <AgentActivityRow summary={s} />}
 
         <ResourceView resource={diagnosis} className="py-6">
           {(data) => <DiagnosisCallout diagnosis={data} onOpen={() => onNavigate('agents')} />}

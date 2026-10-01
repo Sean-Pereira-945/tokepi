@@ -11,7 +11,7 @@ cd frontend && npm install && cd ..
 ## Running locally
 
 ```bash
-driftguard-server --reload         # API on http://127.0.0.1:8000 (SQLite ./driftguard.db)
+DATABASE_URL=sqlite:///./driftguard-local.db driftguard-server --reload   # API on :8000
 cd frontend && npm run dev         # dashboard on http://localhost:5173, API calls proxied to :8000
 ```
 
@@ -28,10 +28,24 @@ driftguard/            installable package
   adapters/            Python decorator, MCP middleware, provider usage extraction
   server/              FastAPI app, schema, service, auth, realtime, retention
 frontend/              React dashboard source (builds into driftguard/server/static)
+  src/views/           one file per sidebar view (Overview, Logs, ...)
+  src/state/           session, workspace (project and filters), per-view queries
+integrations/
+  claude_code/         Claude Code hook (stdlib only) and its README
+examples/              live_demo.py (scripted demo), seed_showcase.py (sample data)
 research/              Phase 1 synthetic drift prototypes and their tests
-tests/                 SDK and server tests
-docs/                  documentation
+tests/                 SDK, server, adapter and hook tests
+docs/                  documentation; docs/images holds the diagram and screenshots
+demo.bat               one-click Windows demo
 ```
+
+`DATABASE_URL` keeps local work on a local SQLite file even when `.env`
+points somewhere else. On Windows PowerShell, set it with
+`$env:DATABASE_URL = "sqlite:///./driftguard-local.db"` first.
+
+To refresh the screenshots in `docs/images`, load the Showcase sample project
+and capture each view at 1440×900. Replace your name and email with
+placeholders first.
 
 ## Tests
 

@@ -45,6 +45,38 @@ These came from the dashboard agent's feedback and from testing the compose stac
   `.env.example`.
 - All relative links in the docs resolve.
 
+## After 0.4.0: Logs (branch `feature/logs`, not committed yet)
+
+Built on its own branch off `refactor/foundation`, so it stays out of the 0.4.0
+PR. Details are in the CHANGELOG under *Unreleased*.
+
+| Area | What was done | How it was verified |
+| --- | --- | --- |
+| Server | Event kinds, opt-in content storage, `PATCH /projects/{id}`, activity filters, search, paging, CSV/JSON export, a live `activity` message | `tests/test_activity_log.py` (10 tests); full suite **167 passed** on SQLite (2026-10-01). It was 140 on PostgreSQL 16 + Redis 7 before the hook work, and hasn't been re-run there since. |
+| SDK | `capture_content`, `record_activity`, content previews from the decorator and MCP adapter | 3 new tests in `tests/test_adapters.py` |
+| Dashboard | Logs view; content-storage switch in Project Settings; Agent Diagnosis refreshes live | Type-check and build pass; 12-step headless browser run (filters, search, drawer, live update, pause, export, settings switch, phone width) with no console errors |
+| Upgrade | Existing databases gain the new columns on startup | A copy of the local demo database upgraded cleanly, and old events became `tool_call` |
+
+**Fixed in the 0.4.0 branch while building this:** the Python `lib/` rule in
+`.gitignore` also matched `frontend/src/lib/`, so that folder was missing from
+the first push and a fresh clone couldn't build the dashboard. The rule is now
+anchored (`/lib/`), and the folder is committed and pushed to
+`refactor/foundation`. A clean clone of that branch was checked: it installs,
+type-checks and builds.
+
+### Claude Code integration (same branch, connected on this machine)
+
+| What | How it was verified |
+| --- | --- |
+| `integrations/claude_code/driftguard_hook.py` maps hook events to DriftGuard events | `tests/test_claude_code_hook.py` (19 tests: turns, transcript tokens and durations, telemetry, and an end-to-end run that blocks a task) |
+| Hooked into this repo through `.claude/settings.local.json`, sending to the local server's **Claude Code** project | Live: this Claude Code session's own tool calls arrived. Three deliberately failing `ls` commands, plus one real failure, marked the task blocked and raised a critical agent alert |
+
+The config with the key (`.claude/driftguard.json`), the hook state and the log
+are gitignored. Content storage is off on the server for the **Claude Code**
+project. The hook is allowed to send content, so turning on the switch in Project
+Settings is enough to start storing it. Duration, model and tokens are read from the session
+transcript, because hooks don't report them.
+
 ## What still needs to be done
 
 ### Before merging (owner decisions or quick tasks)

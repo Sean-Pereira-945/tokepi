@@ -6,14 +6,19 @@ import re
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 MAX_BATCH_SIZE = 500
 MAX_ERROR_MESSAGE = 4000
+# Longest input/output preview stored per agent event; longer text is truncated.
+MAX_CONTENT = 2000
 
 Environment = Literal["prod", "staging", "dev", "test"]
 Severity = Literal["stable", "warning", "critical"]
 TimeRange = Literal["15m", "1h", "24h", "7d", "30d", "all"]
+AgentEventKind = Literal["tool_call", "llm_call", "prompt", "response", "session_start", "session_end"]
+Outcome = Literal["success", "failed"]
+ExportFormat = Literal["csv", "json"]
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 ProjectId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
@@ -85,6 +90,18 @@ class ProjectCreateRequest(BaseModel):
         return _trimmed(v, "name", 128)
 
 
+class ProjectUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    capture_content: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str | None) -> str | None:
+        return None if v is None else _trimmed(v, "name", 128)
+
+
 class PolicyUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -145,12 +162,27 @@ class EventBatchRequest(BaseModel):
     events: list[EventIngestRequest] = Field(min_length=1, max_length=MAX_BATCH_SIZE)
 
 
+def _truncate_text(value: str | None, limit: int) -> str | None:
+    """Keep the start of long text instead of rejecting the event."""
+    if value is not None and len(value) > limit:
+        return value[:limit] + " …[truncated]"
+    return value
+
+
 class AgentEventIngestRequest(BaseModel):
-    """One agent task or tool attempt."""
+    """One agent activity: a tool attempt (the default kind), a model call, a prompt, and so on.
+
+    ``tool_name`` and ``status`` are required for ``tool_call`` events. ``input`` and
+    ``output`` are content previews, stored only when the project has content
+    capture turned on.
+    """
 
     task_id: str
-    tool_name: str
-    status: str
+    kind: AgentEventKind = "tool_call"
+    tool_name: str | None = None
+    status: str | None = None
+    input: str | None = None
+    output: str | None = None
     trace_id: str | None = Field(default=None, max_length=128)
     agent_name: str | None = Field(default=None, max_length=128)
     model: str | None = Field(default=None, max_length=128)
@@ -166,23 +198,36 @@ class AgentEventIngestRequest(BaseModel):
     environment: Environment | None = None
     occurred_at: datetime | None = None
 
-    @field_validator("task_id", "tool_name")
+    @field_validator("task_id")
     @classmethod
-    def _required(cls, v: str) -> str:
-        return _trimmed(v, "value", 128)
+    def _task_id(cls, v: str) -> str:
+        return _trimmed(v, "task_id", 128)
+
+    @field_validator("tool_name")
+    @classmethod
+    def _tool_name(cls, v: str | None) -> str | None:
+        return None if v is None else _trimmed(v, "tool_name", 128)
 
     @field_validator("status")
     @classmethod
-    def _status(cls, v: str) -> str:
-        return _trimmed(v, "status", 32).lower()
+    def _status(cls, v: str | None) -> str | None:
+        return None if v is None else _trimmed(v, "status", 32).lower()
 
     @field_validator("error_message")
     @classmethod
-    def _truncate(cls, v: str | None) -> str | None:
-        """Keep the start of long tracebacks instead of rejecting the event."""
-        if v is not None and len(v) > MAX_ERROR_MESSAGE:
-            return v[:MAX_ERROR_MESSAGE] + " …[truncated]"
-        return v
+    def _truncate_error(cls, v: str | None) -> str | None:
+        return _truncate_text(v, MAX_ERROR_MESSAGE)
+
+    @field_validator("input", "output")
+    @classmethod
+    def _truncate_content(cls, v: str | None) -> str | None:
+        return _truncate_text(v, MAX_CONTENT)
+
+    @model_validator(mode="after")
+    def _tool_fields(self) -> AgentEventIngestRequest:
+        if self.kind == "tool_call" and (self.tool_name is None or self.status is None):
+            raise ValueError("tool_name and status are required for tool_call events")
+        return self
 
 
 class AgentEventBatchRequest(BaseModel):

@@ -12,6 +12,7 @@ import { AgentDiagnosis } from './views/AgentDiagnosis';
 import { Alerts } from './views/Alerts';
 import { Analytics } from './views/Analytics';
 import { Events } from './views/Events';
+import { Logs } from './views/Logs';
 import { NoProjects } from './views/NoProjects';
 import { Overview } from './views/Overview';
 import { Policy } from './views/Policy';
@@ -23,6 +24,8 @@ function CurrentView({ view, onNavigate }: { view: ViewId; onNavigate: (view: Vi
   switch (view) {
     case 'agents':
       return <AgentDiagnosis />;
+    case 'logs':
+      return <Logs onNavigate={onNavigate} />;
     case 'events':
       return <Events />;
     case 'alerts':

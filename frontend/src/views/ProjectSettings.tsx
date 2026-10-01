@@ -1,4 +1,4 @@
-import { KeyRound, Trash2 } from 'lucide-react';
+import { FileText, KeyRound, Trash2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { api, errorMessage } from '../api';
 import { Button } from '../components/Button';
@@ -88,6 +88,66 @@ function RotateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
   );
 }
 
+function ContentStoragePanel() {
+  const project = useProject();
+  const { upsertProject } = useWorkspace();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const enabled = project.capture_content;
+
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      const updated = await api.updateProject(project.project_id, { capture_content: !enabled });
+      upsertProject(updated);
+      toast.push({
+        tone: 'success',
+        title: updated.capture_content ? 'Content storage on' : 'Content storage off',
+        message: updated.capture_content
+          ? 'New agent events keep their inputs and outputs.'
+          : 'New agent events keep metadata only. Content already stored stays until retention removes it.',
+      });
+    } catch (err) {
+      toast.push({ tone: 'error', title: 'Could not change content storage', message: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Panel
+      title="Content storage"
+      description="Whether Logs keeps what agents sent and received, not only what happened."
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-md space-y-2 text-[13px] text-muted">
+          <p>
+            <span className="font-semibold text-body">{enabled ? 'On.' : 'Off.'}</span>{' '}
+            {enabled
+              ? 'Tool inputs and outputs, prompts and responses sent with agent events are stored, up to 2,000 characters each.'
+              : 'Only metadata is stored: tool names, statuses, errors, timings and tokens. Inputs, outputs and prompt text are dropped.'}
+          </p>
+          <p>
+            Content can include code and data from your agent’s work. Secrets, emails and card numbers are redacted before
+            storage, and content is deleted with the rest of the data after the retention period. The SDK also needs{' '}
+            <span className="font-mono text-body">capture_content=True</span> to send it.
+          </p>
+        </div>
+        <Button
+          variant={enabled ? 'secondary' : 'primary'}
+          role="switch"
+          aria-checked={enabled}
+          busy={busy}
+          onClick={() => void toggle()}
+          icon={<FileText aria-hidden className="size-4" />}
+        >
+          {enabled ? 'Stop storing content' : 'Store inputs and outputs'}
+        </Button>
+      </div>
+    </Panel>
+  );
+}
+
 function DeleteProjectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const project = useProject();
   const { removeProject } = useWorkspace();
@@ -170,13 +230,14 @@ export function ProjectSettings() {
     ['Name', project.name],
     ['Environment', project.environment],
     ['API key', `${project.api_key_hint}…`],
+    ['Content storage', project.capture_content ? 'On' : 'Off'],
     ['Created', fmtDateTime(project.created_at)],
     ['Account ID', project.account_id],
   ];
 
   return (
     <>
-      <PageHeader title="Project Settings" description="Project details, API key rotation and deletion." />
+      <PageHeader title="Project Settings" description="Project details, API key rotation, content storage and deletion." />
       <div className="max-w-3xl space-y-6">
         <Panel title="Details">
           <dl className="grid gap-x-6 gap-y-4 text-[13px] sm:grid-cols-2">
@@ -200,6 +261,8 @@ export function ProjectSettings() {
             </Button>
           </div>
         </Panel>
+
+        <ContentStoragePanel />
 
         <Panel title="Danger zone" className="border-coral/30">
           <div className="flex flex-wrap items-center justify-between gap-4">

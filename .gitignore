@@ -15,8 +15,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored to the repo root so frontend/src/lib/ is not ignored.
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -92,3 +93,9 @@ driftguard/server/static/
 .frontend_source/
 
 
+
+# Claude Code: personal settings, plus the DriftGuard hook key, state and log
+.claude/settings.local.json
+.claude/driftguard.json
+.claude/driftguard-state/
+.claude/driftguard-hook.log

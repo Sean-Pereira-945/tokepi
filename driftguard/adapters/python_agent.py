@@ -31,6 +31,9 @@ from .usage import usage_from_response
 
 F = TypeVar("F", bound=Callable[..., Any])
 
+# Longest content preview sent per field; the server truncates at the same length.
+PREVIEW_LIMIT = 2000
+
 _current: contextvars.ContextVar[AgentContext | None] = contextvars.ContextVar("driftguard_agent_context", default=None)
 
 
@@ -38,6 +41,18 @@ def fingerprint(*parts: Any) -> str:
     """Return a short stable hash of tool inputs, used to spot duplicate calls."""
     encoded = json.dumps(parts, sort_keys=True, default=repr)
     return hashlib.sha256(encoded.encode()).hexdigest()[:16]
+
+
+def preview(value: Any) -> str:
+    """Render a tool argument or result as short text for the activity log."""
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, default=repr, ensure_ascii=False)
+        except (TypeError, ValueError):
+            text = repr(value)
+    return text if len(text) <= PREVIEW_LIMIT else text[:PREVIEW_LIMIT] + " …[truncated]"
 
 
 class AgentContext:
@@ -115,8 +130,14 @@ class AgentContext:
         duration_ms: float | None = None,
         input_hash: str | None = None,
         tool_call_id: str | None = None,
+        input: Any = None,
+        output: Any = None,
     ) -> dict[str, Any]:
-        """Emit one agent event for a tool call. Used by the decorator and MCP adapter."""
+        """Emit one agent event for a tool call. Used by the decorator and MCP adapter.
+
+        ``input`` and ``output`` are sent as previews only when the client has
+        ``capture_content`` on.
+        """
         self.tool_attempts[tool_name] = self.tool_attempts.get(tool_name, 0) + 1
         event: dict[str, Any] = {
             "task_id": self.task_id,
@@ -132,8 +153,45 @@ class AgentContext:
             event["duration_ms"] = round(duration_ms, 3)
         if input_hash:
             event["input_hash"] = input_hash
+        self._add_content(event, input, output)
         event.update(self._take_usage())
         return self.client.capture_agent_event(**event)
+
+    def record_activity(
+        self,
+        kind: str,
+        *,
+        input: Any = None,
+        output: Any = None,
+        status: str | None = None,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        """Log a non-tool activity for this task, such as ``prompt``, ``response`` or ``llm_call``.
+
+        Extra keyword arguments (``model``, ``prompt_tokens``, ``duration_ms``, …)
+        are sent as event fields. These events appear in the activity log and are
+        ignored by the blocked-tool diagnosis.
+        """
+        event: dict[str, Any] = {"task_id": self.task_id, "trace_id": self.trace_id, "kind": kind, **fields}
+        if status is not None:
+            event["status"] = status
+        self._add_content(event, input, output)
+        return self.client.capture_agent_event(**event)
+
+    def _add_content(self, event: dict[str, Any], input: Any, output: Any) -> None:
+        if not self.client.capture_content:
+            return
+        if input is not None:
+            event["input"] = preview(input)
+        if output is not None:
+            event["output"] = preview(output)
+
+
+def _call_args(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    """The arguments of a tool call, in the simplest form for a preview."""
+    if not kwargs:
+        return args[0] if len(args) == 1 else list(args)
+    return {"args": list(args), "kwargs": kwargs} if args else kwargs
 
 
 def get_current_context() -> AgentContext | None:
@@ -169,10 +227,16 @@ def driftguard_tool(name: str | None = None) -> Callable[[F], F]:
                         error=exc,
                         input_hash=input_hash,
                         duration_ms=(time.perf_counter() - started) * 1000,
+                        input=_call_args(args, kwargs),
                     )
                     raise
                 ctx.record_tool_call(
-                    tool_name, "success", input_hash=input_hash, duration_ms=(time.perf_counter() - started) * 1000
+                    tool_name,
+                    "success",
+                    input_hash=input_hash,
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                    input=_call_args(args, kwargs),
+                    output=result,
                 )
                 return result
 
@@ -194,10 +258,16 @@ def driftguard_tool(name: str | None = None) -> Callable[[F], F]:
                     error=exc,
                     input_hash=input_hash,
                     duration_ms=(time.perf_counter() - started) * 1000,
+                    input=_call_args(args, kwargs),
                 )
                 raise
             ctx.record_tool_call(
-                tool_name, "success", input_hash=input_hash, duration_ms=(time.perf_counter() - started) * 1000
+                tool_name,
+                "success",
+                input_hash=input_hash,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                input=_call_args(args, kwargs),
+                output=result,
             )
             return result
 

@@ -5,6 +5,7 @@
 import { readStorage, STORAGE_KEYS, writeStorage } from './lib/storage';
 import type {
   Account,
+  ActivityQuery,
   AgentDiagnosis,
   AgentEvent,
   Alert,
@@ -18,6 +19,7 @@ import type {
   PolicyUpdate,
   Project,
   ProjectCreateRequest,
+  ProjectUpdate,
   ProjectWithKey,
   RegisterRequest,
   Session,
@@ -175,6 +177,8 @@ export const api = {
 
   listProjects: (signal?: AbortSignal) => request<Project[]>('/projects', { signal }),
   createProject: (body: ProjectCreateRequest) => request<ProjectWithKey>('/projects', { method: 'POST', body }),
+  updateProject: (id: string, body: ProjectUpdate) =>
+    request<Project>(`/projects/${enc(id)}`, { method: 'PATCH', body }),
   deleteProject: (id: string) => request<void>(`/projects/${enc(id)}`, { method: 'DELETE' }),
   rotateApiKey: (id: string) => request<ProjectWithKey>(`/projects/${enc(id)}/api-key`, { method: 'POST' }),
 
@@ -211,16 +215,60 @@ export const api = {
   listAgentEvents: (
     id: string,
     filters: Filters,
-    opts: { taskId?: string; limit?: number } = {},
+    opts: ActivityQuery & { limit?: number; beforeId?: number } = {},
     signal?: AbortSignal,
   ) =>
     request<AgentEvent[]>(`/projects/${enc(id)}/agent-events`, {
-      query: { ...filterQuery(filters), task_id: opts.taskId, limit: opts.limit },
+      query: { ...filterQuery(filters), ...activityQuery(opts), limit: opts.limit, before_id: opts.beforeId },
       signal,
     }),
   agentDiagnosis: (id: string, filters: Filters, signal?: AbortSignal) =>
     request<AgentDiagnosis>(`/projects/${enc(id)}/agent-diagnosis`, { query: filterQuery(filters), signal }),
 };
+
+function activityQuery(opts: ActivityQuery): Record<string, QueryValue> {
+  return {
+    task_id: opts.taskId,
+    kind: opts.kind,
+    tool_name: opts.toolName,
+    agent_name: opts.agentName,
+    outcome: opts.outcome,
+    q: opts.q,
+  };
+}
+
+/** Download the filtered activity log (up to 10,000 rows) as a file. */
+export async function downloadActivity(
+  projectId: string,
+  filters: Filters,
+  opts: ActivityQuery,
+  format: 'csv' | 'json',
+): Promise<void> {
+  const url = buildUrl(`/projects/${enc(projectId)}/agent-events/export`, {
+    ...filterQuery(filters),
+    ...activityQuery(opts),
+    format,
+  });
+  const token = getToken();
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  } catch {
+    throw new ApiError(0, 'Cannot reach the DriftGuard server. Check your connection and try again.');
+  }
+  if (!response.ok) {
+    if (response.status === 401 && token) handleUnauthorized();
+    throw new ApiError(response.status, fallbackMessage(response.status));
+  }
+  const blob = await response.blob();
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `driftguard-${projectId}-activity.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
 
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;

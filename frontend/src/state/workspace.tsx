@@ -38,6 +38,8 @@ interface WorkspaceContextValue {
   refreshKey: number;
   /** Bumped when alerts change (realtime or local resolve/create). */
   alertsKey: number;
+  /** Bumped when new agent events arrive over the realtime connection. */
+  activityKey: number;
   refreshAll: () => void;
   alertsChanged: () => void;
 
@@ -57,6 +59,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [filters, setFiltersState] = useState<Filters>(() => readJson(STORAGE_KEYS.filters, isFilters) ?? DEFAULT_FILTERS);
   const [refreshKey, setRefreshKey] = useState(0);
   const [alertsKey, setAlertsKey] = useState(0);
+  const [activityKey, setActivityKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -64,7 +67,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     api.listProjects(controller.signal).then(
       (projects) => setProjectsState({ status: 'ready', projects }),
       (error: unknown) => {
-        if (!controller.signal.aborted) setProjectsState({ status: 'error', message: errorMessage(error) });
+        // A failed background reload keeps the list already on screen.
+        if (!controller.signal.aborted)
+          setProjectsState((prev) => (prev.status === 'ready' ? prev : { status: 'error', message: errorMessage(error) }));
       },
     );
     return () => controller.abort();
@@ -106,16 +111,42 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     writeStorage(STORAGE_KEYS.filters, JSON.stringify(next));
   }, []);
 
-  const refreshAll = useCallback(() => setRefreshKey((n) => n + 1), []);
+  // Refresh also reloads the project list, so projects created elsewhere (the API, a script) appear.
+  const refreshAll = useCallback(() => {
+    setRefreshKey((n) => n + 1);
+    setProjectsTick((n) => n + 1);
+  }, []);
+
+  // Pick up new projects when the user comes back to the tab.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') setProjectsTick((n) => n + 1);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
   const alertsChanged = useCallback(() => setAlertsKey((n) => n + 1), []);
 
   // Realtime: coalesce bursts of alert messages into one refresh.
   const debounce = useRef<number | undefined>(undefined);
+  const activityDebounce = useRef<number | undefined>(undefined);
   const toasted = useRef(new Set<number>());
   useEffect(() => {
     toasted.current.clear();
-    return () => window.clearTimeout(debounce.current);
+    return () => {
+      window.clearTimeout(debounce.current);
+      window.clearTimeout(activityDebounce.current);
+    };
   }, [projectId]);
+
+  // An agent emits many events in a burst; refresh activity views at most every 750ms.
+  const onActivity = useCallback(() => {
+    if (activityDebounce.current !== undefined) return;
+    activityDebounce.current = window.setTimeout(() => {
+      activityDebounce.current = undefined;
+      setActivityKey((n) => n + 1);
+    }, 750);
+  }, []);
 
   const onAlert = useCallback(
     (alert: Alert, action: AlertAction) => {
@@ -140,7 +171,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     api.me().catch(() => undefined);
   }, []);
 
-  const connection = useRealtime(projectId, token, { onAlert, onAuthFailure, onHandshakeFailure });
+  const connection = useRealtime(projectId, token, { onAlert, onActivity, onAuthFailure, onHandshakeFailure });
 
   const summary = useResource<Summary>(
     projectId ? (signal) => api.summary(projectId, filters, signal) : null,
@@ -163,6 +194,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setFilters,
       refreshKey,
       alertsKey,
+      activityKey,
       refreshAll,
       alertsChanged,
       summary,
@@ -180,6 +212,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setFilters,
       refreshKey,
       alertsKey,
+      activityKey,
       refreshAll,
       alertsChanged,
       summary,

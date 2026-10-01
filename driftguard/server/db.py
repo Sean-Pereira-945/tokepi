@@ -88,6 +88,8 @@ projects = Table(
     Column("environment", String(16), nullable=False, server_default="prod"),
     Column("api_key_hash", String(64)),
     Column("api_key_hint", String(16)),
+    # Store tool inputs/outputs and prompt text sent with agent events (opt-in, off by default).
+    Column("capture_content", Boolean, nullable=False, server_default=false()),
     Column("created_at", UTCDateTime, default=utcnow),
     Index("ix_projects_account", "account_id"),
     Index("ix_projects_api_key_hash", "api_key_hash", unique=True),
@@ -159,6 +161,8 @@ agent_events = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("project_id", String(64), ForeignKey("projects.project_id"), nullable=False),
     Column("task_id", String(128), nullable=False),
+    # tool_call (the default), llm_call, prompt, response, session_start, session_end.
+    Column("kind", String(32), nullable=False, server_default="tool_call"),
     Column("trace_id", String(128)),
     Column("agent_name", String(128)),
     Column("model", String(128)),
@@ -174,6 +178,9 @@ agent_events = Table(
     Column("total_tokens", Float),
     Column("duration_ms", Float),
     Column("environment", String(16)),
+    # Content previews; only stored when the project has capture_content on.
+    Column("input_text", Text),
+    Column("output_text", Text),
     Column("created_at", UTCDateTime, default=utcnow),
     Index("ix_agent_events_project_created", "project_id", "created_at"),
     Index("ix_agent_events_project_task", "project_id", "task_id"),

@@ -63,6 +63,17 @@ are for planning only; they aren't commitments.
 - [x] **Dashboard** rebuilt against the real API under the DriftGuard brand:
   sign-in, live alerts, agent diagnosis, and no mock data.
 
+### Activity log (unreleased, branch `feature/logs`)
+- [x] **Logs view**: every agent activity newest first, with server-side search,
+  kind and outcome filters, live updates, a detail drawer, and CSV/JSON export.
+- [x] **Event kinds** beyond tool calls: model calls, prompts, responses and
+  sessions. The diagnosis still uses tool calls only.
+- [x] **Opt-in content storage** per project, with a matching SDK switch
+  (`capture_content`). Content is scrubbed, capped at 2,000 characters, and
+  removed by retention.
+- [x] **Claude Code integration** through hooks: real sessions appear in Logs
+  and Agent Diagnosis, and a command Claude keeps retrying is flagged as blocked.
+
 ## Next
 
 ### Integrations
