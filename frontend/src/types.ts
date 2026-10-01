@@ -10,6 +10,18 @@ export const ENVIRONMENTS: readonly Environment[] = ['prod', 'staging', 'dev', '
 export const SEVERITIES: readonly Severity[] = ['stable', 'warning', 'critical'];
 export const TIME_RANGES: readonly TimeRange[] = ['15m', '1h', '24h', '7d', '30d', 'all'];
 
+/** What an agent event records. `tool_call` events feed the diagnosis; the rest only appear in Logs. */
+export type AgentEventKind = 'tool_call' | 'llm_call' | 'prompt' | 'response' | 'session_start' | 'session_end';
+export const AGENT_EVENT_KINDS: readonly AgentEventKind[] = [
+  'tool_call',
+  'llm_call',
+  'prompt',
+  'response',
+  'session_start',
+  'session_end',
+];
+export type Outcome = 'success' | 'failed';
+
 // ---- Meta -------------------------------------------------------------------
 
 export interface HealthResponse {
@@ -58,6 +70,8 @@ export interface Project {
   name: string;
   environment: Environment;
   api_key_hint: string;
+  /** Store tool inputs/outputs and prompt text sent with agent events. */
+  capture_content: boolean;
   created_at: string;
 }
 
@@ -156,6 +170,19 @@ export interface SummaryFilters {
   time_range: TimeRange;
 }
 
+/** Totals over agent events: the same rows the Logs view lists. */
+export interface AgentActivity {
+  events: number;
+  tool_calls: number;
+  failed_tool_calls: number;
+  failure_rate: number | null;
+  turns: number;
+  tasks: number;
+  total_tokens: number;
+  avg_tool_duration_ms: number | null;
+  last_activity: string | null;
+}
+
 export interface Summary {
   project_id: string;
   status: Severity;
@@ -169,6 +196,7 @@ export interface Summary {
   critical_alerts: number;
   warning_alerts: number;
   saved_tokens: number;
+  agent_activity: AgentActivity;
   last_updated: string | null;
   policy: Policy;
   filters: SummaryFilters;
@@ -204,6 +232,7 @@ export interface AlertCreateRequest {
 export interface AgentEvent {
   id: number;
   task_id: string;
+  kind: AgentEventKind;
   trace_id: string | null;
   agent_name: string | null;
   model: string | null;
@@ -219,7 +248,25 @@ export interface AgentEvent {
   total_tokens: number | null;
   duration_ms: number | null;
   environment: Environment | null;
+  /** Content previews; null unless the project stores content. */
+  input: string | null;
+  output: string | null;
   created_at: string;
+}
+
+/** Server-side filters for the activity log (`GET /projects/{id}/agent-events`). */
+export interface ActivityQuery {
+  taskId?: string;
+  kind?: AgentEventKind;
+  toolName?: string;
+  agentName?: string;
+  outcome?: Outcome;
+  q?: string;
+}
+
+export interface ProjectUpdate {
+  name?: string;
+  capture_content?: boolean;
 }
 
 export interface AgentTask {
@@ -270,6 +317,12 @@ export interface AlertMessage {
   type: 'alert';
   action: AlertAction;
   alert: Alert;
+}
+
+/** Sent after agent events are ingested; views re-fetch over HTTP. */
+export interface ActivityMessage {
+  type: 'activity';
+  count: number;
 }
 
 // ---- Dashboard filters (client-side) ----------------------------------------

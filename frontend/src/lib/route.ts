@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 export const VIEWS = [
   { id: 'overview', label: 'Overview' },
   { id: 'agents', label: 'Agent Diagnosis' },
+  { id: 'logs', label: 'Logs' },
   { id: 'events', label: 'Events' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'analytics', label: 'Analytics' },

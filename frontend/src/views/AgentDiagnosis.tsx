@@ -39,8 +39,8 @@ function DiagnosisStats({ data }: { data: Diagnosis }) {
 function AttemptTimeline({ task }: { task: AgentTask }) {
   const attempts = useProjectQuery(
     'task-attempts',
-    (id, f, signal) => api.listAgentEvents(id, f, { taskId: task.task_id, limit: 1000 }, signal),
-    { key: task.task_id, watchAlerts: true },
+    (id, f, signal) => api.listAgentEvents(id, f, { taskId: task.task_id, kind: 'tool_call', limit: 1000 }, signal),
+    { key: task.task_id, watchAlerts: true, watchActivity: true },
   );
   return (
     <ResourceView
@@ -177,7 +177,10 @@ function TaskDrawer({ task, onClose }: { task: AgentTask | null; onClose: () => 
 }
 
 export function AgentDiagnosis() {
-  const diagnosis = useProjectQuery('diagnosis', (id, f, signal) => api.agentDiagnosis(id, f, signal), { watchAlerts: true });
+  const diagnosis = useProjectQuery('diagnosis', (id, f, signal) => api.agentDiagnosis(id, f, signal), {
+    watchAlerts: true,
+    watchActivity: true,
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = diagnosis.data?.tasks.find((t) => t.task_id === selectedId) ?? null;
 

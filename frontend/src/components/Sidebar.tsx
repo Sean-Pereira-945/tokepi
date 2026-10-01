@@ -6,6 +6,7 @@ import {
   Code2,
   LayoutDashboard,
   LogOut,
+  ScrollText,
   Settings,
   SlidersHorizontal,
   X,
@@ -20,6 +21,7 @@ import { Logo } from './Logo';
 const ICONS: Record<ViewId, LucideIcon> = {
   overview: LayoutDashboard,
   agents: Bot,
+  logs: ScrollText,
   events: Activity,
   alerts: Bell,
   analytics: BarChart3,

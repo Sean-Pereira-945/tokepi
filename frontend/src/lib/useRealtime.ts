@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { REALTIME_PROTOCOL, realtimeUrl } from '../api';
-import type { Alert, AlertAction, AlertMessage } from '../types';
+import type { ActivityMessage, Alert, AlertAction, AlertMessage } from '../types';
 
 export type ConnectionState = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'offline';
 
 interface Handlers {
   onAlert: (alert: Alert, action: AlertAction) => void;
+  /** New agent events were ingested for the project. */
+  onActivity: (count: number) => void;
   /** The server closed with 4401 (bad or expired credentials). */
   onAuthFailure: () => void;
   /** The socket closed before it ever opened (server unreachable); the caller may check the session. */
@@ -22,6 +24,10 @@ function isAlertMessage(value: unknown): value is AlertMessage {
     (value as { type?: unknown }).type === 'alert' &&
     typeof (value as { alert?: unknown }).alert === 'object'
   );
+}
+
+function isActivityMessage(value: unknown): value is ActivityMessage {
+  return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'activity';
 }
 
 /**
@@ -64,6 +70,7 @@ export function useRealtime(projectId: string | null, token: string | null, hand
         try {
           const parsed: unknown = JSON.parse(event.data);
           if (isAlertMessage(parsed)) handlersRef.current.onAlert(parsed.alert, parsed.action);
+          else if (isActivityMessage(parsed)) handlersRef.current.onActivity(parsed.count);
         } catch {
           // Ignore malformed frames.
         }
