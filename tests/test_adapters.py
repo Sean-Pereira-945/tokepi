@@ -175,3 +175,51 @@ def test_mcp_instrumented_session(client):
     assert statuses == [("good", "success"), ("bad", "failed"), ("boom", "failed")]
     assert client.agent_events[1]["error_message"] == "nope"
     assert client.agent_events[2]["error_type"] == "ConnectionError"
+
+
+def test_content_is_not_sent_unless_the_client_opts_in(client):
+    @driftguard_tool("terminal")
+    def run(cmd):
+        return "12 passed"
+
+    with AgentContext(client, task_id="t") as ctx:
+        run("pytest -q")
+        ctx.record_activity("prompt", input="fix the tests")
+    tool_event, prompt_event = client.agent_events
+    assert "input" not in tool_event and "output" not in tool_event
+    assert prompt_event["kind"] == "prompt" and "input" not in prompt_event
+    client.capture_agent_event(task_id="t", tool_name="x", status="ok", input="raw", output="raw")
+    assert "input" not in client.agent_events[-1]
+
+
+def test_content_previews_when_capture_is_on():
+    client = DriftGuardClient(api_key="k", environment="test", capture_content=True)
+
+    @driftguard_tool("editor")
+    def edit(path, *, text):
+        if path == "missing.py":
+            raise FileNotFoundError(path)
+        return {"changed": 1}
+
+    with AgentContext(client, task_id="t") as ctx:
+        ctx.record_activity("prompt", input="rename the function")
+        edit("app.py", text="x" * 3000)
+        with pytest.raises(FileNotFoundError):
+            edit("missing.py", text="y")
+        ctx.record_activity("llm_call", model="gpt-x", status="success", prompt_tokens=120)
+    prompt, ok, failed, llm = client.agent_events
+    assert prompt["input"] == "rename the function" and "tool_name" not in prompt
+    assert ok["input"].startswith('{"args": ["app.py"], "kwargs": {"text": "xxx')
+    assert ok["input"].endswith("…[truncated]")
+    assert ok["output"] == '{"changed": 1}'
+    assert failed["status"] == "failed" and "output" not in failed
+    assert llm["kind"] == "llm_call" and llm["model"] == "gpt-x" and llm["prompt_tokens"] == 120
+
+
+def test_mcp_sends_arguments_and_result_text_when_capture_is_on():
+    client = DriftGuardClient(api_key="k", environment="test", capture_content=True)
+    middleware = MCPMiddleware(client, task_id="t")
+    request = {"id": 1, "method": "tools/call", "params": {"name": "search", "arguments": {"q": "docs"}}}
+    middleware.intercept_response(request, {"result": {"content": [{"type": "text", "text": "3 hits"}]}})
+    event = client.agent_events[0]
+    assert event["input"] == '{"q": "docs"}' and event["output"] == "3 hits"

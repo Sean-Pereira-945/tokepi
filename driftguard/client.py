@@ -39,6 +39,10 @@ class DriftGuardClient:
             called without arguments.
         max_queue: Maximum queued events per queue. When full, the oldest event
             is dropped and a warning is logged.
+        capture_content: Send ``input``/``output`` content previews (tool
+            arguments and results, prompt text) with agent events. Off by
+            default; when off, content is removed before events are queued. The
+            server also stores content only for projects that opt in.
     """
 
     def __init__(
@@ -50,6 +54,7 @@ class DriftGuardClient:
         timeout: float = 10.0,
         project_id: str | None = None,
         max_queue: int = 10_000,
+        capture_content: bool = False,
     ) -> None:
         self.api_key = api_key
         self.project_name = project_name or project_id or "driftguard-app"
@@ -58,6 +63,7 @@ class DriftGuardClient:
         self.timeout = timeout
         self.project_id = project_id
         self.max_queue = max_queue
+        self.capture_content = capture_content
         self.metrics: list[dict[str, Any]] = []
         self.agent_events: list[dict[str, Any]] = []
         self._queue_lock = threading.Lock()
@@ -92,12 +98,16 @@ class DriftGuardClient:
         return payload
 
     def capture_agent_event(self, **event: Any) -> dict[str, Any]:
-        """Queue one agent task/tool attempt for retry and failure analysis.
+        """Queue one agent activity: a tool attempt by default, or another ``kind``.
 
-        Required fields: ``task_id``, ``tool_name``, ``status``. Optional:
+        Tool calls need ``task_id``, ``tool_name`` and ``status``. Other kinds
+        (``llm_call``, ``prompt``, ``response``, ``session_start``,
+        ``session_end``) need only ``task_id`` and ``kind``. Optional:
         ``trace_id``, ``tool_call_id``, ``attempt``, ``error_type``,
         ``error_message``, ``prompt_tokens``, ``completion_tokens``,
-        ``total_tokens``, ``duration_ms``, ``model``, ``input_hash``.
+        ``total_tokens``, ``duration_ms``, ``model``, ``input_hash``, and the
+        content previews ``input`` and ``output`` (sent only when
+        ``capture_content`` is on).
         """
         payload = {
             "agent_name": self.project_name,
@@ -105,6 +115,9 @@ class DriftGuardClient:
             "occurred_at": _utc_now_iso(),
             **event,
         }
+        if not self.capture_content:
+            payload.pop("input", None)
+            payload.pop("output", None)
         self._enqueue(self.agent_events, payload)
         return payload
 

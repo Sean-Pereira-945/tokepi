@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import csv
 import hashlib
+import io
+import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -35,7 +38,7 @@ from fastapi import (
 )
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from driftguard import __version__
@@ -47,15 +50,19 @@ from .retention import run_retention_loop
 from .schemas import (
     AgentEventBatchRequest,
     AgentEventIngestRequest,
+    AgentEventKind,
     AlertCreateRequest,
     AlertUpdateRequest,
     DeleteAccountRequest,
     Environment,
     EventBatchRequest,
     EventIngestRequest,
+    ExportFormat,
     LoginRequest,
+    Outcome,
     PolicyUpdateRequest,
     ProjectCreateRequest,
+    ProjectUpdateRequest,
     RegisterRequest,
     Severity,
     TimeRange,
@@ -67,6 +74,39 @@ from .settings import Settings
 logger = logging.getLogger(__name__)
 DEFAULT_STATIC_DIR = Path(__file__).parent / "static"
 WS_SUBPROTOCOL = "driftguard"
+MAX_EXPORT_ROWS = 10_000
+EXPORT_COLUMNS = (
+    "id",
+    "created_at",
+    "kind",
+    "environment",
+    "agent_name",
+    "model",
+    "task_id",
+    "trace_id",
+    "tool_name",
+    "tool_call_id",
+    "attempt",
+    "status",
+    "error_type",
+    "error_message",
+    "input_hash",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "duration_ms",
+    "input",
+    "output",
+)
+
+
+def _export_csv(rows: list[dict[str, Any]]) -> str:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=EXPORT_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
+
 
 _FALLBACK_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>DriftGuard</title></head>
 <body style="font-family:system-ui;background:#000;color:#f4f4f5;padding:40px">
@@ -175,6 +215,32 @@ def ingest_project(
     if not x_api_key:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing X-API-Key header")
     return _project_from_key(service, x_api_key, project_id)
+
+
+def activity_filters(
+    environment: Environment | None = None,
+    time_range: TimeRange = "all",
+    task_id: str | None = None,
+    kind: AgentEventKind | None = None,
+    tool_name: str | None = None,
+    agent_name: str | None = None,
+    outcome: Outcome | None = None,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+) -> dict[str, Any]:
+    """Query filters shared by the activity list and export."""
+    return {
+        "environment": environment,
+        "time_range": time_range,
+        "task_id": task_id,
+        "kind": kind,
+        "tool_name": tool_name,
+        "agent_name": agent_name,
+        "outcome": outcome,
+        "search": q.strip() if q and q.strip() else None,
+    }
+
+
+ActivityFilters = Annotated[dict[str, Any], Depends(activity_filters)]
 
 
 OwnerDep = Annotated[dict[str, Any], Depends(project_owner)]
@@ -346,6 +412,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def get_project(project: ReaderDep) -> dict[str, Any]:
         return project
 
+    @app.patch("/projects/{project_id}", tags=["projects"], dependencies=default_limit)
+    def update_project(body: ProjectUpdateRequest, project: OwnerDep) -> dict[str, Any]:
+        return service.update_project(project["project_id"], body.model_dump(exclude_none=True))
+
     @app.delete(
         "/projects/{project_id}",
         tags=["projects"],
@@ -445,14 +515,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/projects/{project_id}/agent-events", tags=["agents"], dependencies=default_limit)
     def list_agent_events(
         project: ReaderDep,
-        environment: Environment | None = None,
-        time_range: TimeRange = "all",
-        task_id: str | None = None,
+        filters: ActivityFilters,
+        before_id: int | None = None,
         limit: Annotated[int, Query(ge=1, le=1000)] = 200,
     ) -> list[dict[str, Any]]:
-        return service.list_agent_events(
-            project["project_id"], environment=environment, time_range=time_range, task_id=task_id, limit=limit
-        )
+        return service.list_agent_events(project["project_id"], before_id=before_id, limit=limit, **filters)
+
+    @app.get("/projects/{project_id}/agent-events/export", tags=["agents"], dependencies=default_limit)
+    def export_agent_events(project: ReaderDep, filters: ActivityFilters, format: ExportFormat = "csv") -> Response:
+        rows = service.list_agent_events(project["project_id"], limit=MAX_EXPORT_ROWS, **filters)
+        filename = f"driftguard-{project['project_id']}-activity.{format}"
+        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        if format == "json":
+            return Response(json.dumps(rows, indent=2), media_type="application/json", headers=headers)
+        return PlainTextResponse(_export_csv(rows), media_type="text/csv", headers=headers)
 
     @app.get("/projects/{project_id}/agent-diagnosis", tags=["agents"], dependencies=default_limit)
     def agent_diagnosis(
@@ -470,6 +546,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def _ingest_agent(project: dict[str, Any], items: list[AgentEventIngestRequest]) -> int:
         count, changed = service.ingest_agent_events(project, [i.model_dump(exclude_none=True) for i in items])
         publish_alerts(project["project_id"], changed)
+        # Tell open dashboards to refresh their activity views (the rows are fetched over HTTP).
+        broadcaster.publish(project["project_id"], {"type": "activity", "count": count})
         return count
 
     @app.post("/events/{project_id}", tags=["ingest"], dependencies=ingest_limit)

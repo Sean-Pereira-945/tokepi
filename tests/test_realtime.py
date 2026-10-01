@@ -40,9 +40,13 @@ def test_agent_blocked_alert_is_pushed_via_api_key_socket(client, project):
                 json={"task_id": "t", "tool_name": "terminal", "status": "failed"},
                 headers=project["key_headers"],
             )
-        message = ws.receive_json()
-    assert message["alert"]["source"] == "agent"
-    assert "terminal" in message["alert"]["message"]
+        # Every ingest announces new activity; the third one also raises the alert.
+        messages = [ws.receive_json() for _ in range(4)]
+    assert [m["type"] for m in messages] == ["activity", "activity", "alert", "activity"]
+    assert messages[0]["count"] == 1
+    alert = messages[2]["alert"]
+    assert alert["source"] == "agent"
+    assert "terminal" in alert["message"]
 
 
 def test_subprotocol_auth_keeps_credentials_out_of_the_url(client, account):

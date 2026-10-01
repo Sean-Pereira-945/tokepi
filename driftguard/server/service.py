@@ -13,11 +13,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
-from sqlalchemy import and_, case, delete, func, insert, select, update
+from sqlalchemy import and_, case, delete, func, insert, or_, select, update
 from sqlalchemy.engine import Connection, Engine, RowMapping
 from sqlalchemy.exc import IntegrityError
 
-from driftguard.agent_analysis import analyze_agent_events
+from driftguard.agent_analysis import FAILED_STATUSES, SUCCESS_STATUSES, analyze_agent_events
 from driftguard.policy import DEFAULT_POLICY, evaluate_drift
 
 from . import db
@@ -85,6 +85,7 @@ def _project_dict(row: RowMapping) -> dict[str, Any]:
         "name": row["name"],
         "environment": row["environment"],
         "api_key_hint": row["api_key_hint"],
+        "capture_content": bool(row["capture_content"]),
         "created_at": iso(row["created_at"]),
     }
 
@@ -126,6 +127,7 @@ def _event_dict(row: RowMapping) -> dict[str, Any]:
 _AGENT_COLUMNS = (
     "id",
     "task_id",
+    "kind",
     "trace_id",
     "agent_name",
     "model",
@@ -146,6 +148,9 @@ _AGENT_COLUMNS = (
 
 def _agent_dict(row: RowMapping) -> dict[str, Any]:
     data = {name: row[name] for name in _AGENT_COLUMNS}
+    data["kind"] = data["kind"] or "tool_call"
+    data["input"] = row["input_text"]
+    data["output"] = row["output_text"]
     data["created_at"] = iso(row["created_at"])
     return data
 
@@ -324,6 +329,14 @@ class DriftGuardService:
                 .all()
             )
         return [_project_dict(row) for row in rows]
+
+    def update_project(self, project_id: str, updates: Mapping[str, Any]) -> dict[str, Any]:
+        """Change a project's name or content-capture setting."""
+        values = {key: value for key, value in updates.items() if key in {"name", "capture_content"}}
+        if values:
+            with self.engine.begin() as conn:
+                conn.execute(update(projects).where(projects.c.project_id == project_id).values(**values))
+        return self.get_project(project_id)
 
     def project_for_api_key(self, api_key: str) -> dict[str, Any]:
         """Resolve a project API key or raise :class:`AuthError`."""
@@ -571,7 +584,7 @@ class DriftGuardService:
     def summary(
         self, project_id: str, *, environment: str | None = None, severity: str | None = None, time_range: str = "all"
     ) -> dict[str, Any]:
-        """Aggregate telemetry and alerts for the dashboard overview."""
+        """Aggregate telemetry, agent activity and alerts for the dashboard overview."""
         policy = self.get_policy(project_id)
         cutoff = _cutoff(time_range)
         event_filter = [events.c.project_id == project_id]
@@ -615,6 +628,7 @@ class DriftGuardService:
                 .order_by(func.count().desc())
                 .limit(5)
             ).all()
+            activity = self._agent_activity(conn, project_id, environment, cutoff)
 
         open_alerts = self.list_alerts(
             project_id, severity=severity, environment=environment, time_range=time_range, resolved=False
@@ -624,6 +638,7 @@ class DriftGuardService:
         saved = round(sum(a["saved_tokens"] for a in open_alerts), 3)
         last_alert = max((a["created_at"] for a in open_alerts if a["created_at"]), default=None)
         last_event = iso(stats["last_event"])
+        last_activity = activity["last_activity"]
 
         def rounded(value: Any, digits: int = 4) -> float | None:
             return round(float(value), digits) if value is not None else None
@@ -651,9 +666,62 @@ class DriftGuardService:
             "critical_alerts": critical,
             "warning_alerts": warning,
             "saved_tokens": saved,
-            "last_updated": max(filter(None, (last_event, last_alert)), default=None),
+            "agent_activity": activity,
+            "last_updated": max(filter(None, (last_event, last_alert, last_activity)), default=None),
             "policy": policy,
             "filters": {"environment": environment or "all", "severity": severity or "all", "time_range": time_range},
+        }
+
+    @staticmethod
+    def _agent_activity(
+        conn: Connection, project_id: str, environment: str | None, cutoff: datetime | None
+    ) -> dict[str, Any]:
+        """Totals over agent events: the same rows the activity log lists."""
+        c = agent_events.c
+        where = [c.project_id == project_id]
+        if environment:
+            where.append(c.environment == environment)
+        if cutoff is not None:
+            where.append(c.created_at >= cutoff)
+        is_tool = c.kind == "tool_call"
+        row = (
+            conn.execute(
+                select(
+                    func.count().label("events"),
+                    func.sum(case((is_tool, 1), else_=0)).label("tool_calls"),
+                    func.sum(case((and_(is_tool, c.status.in_(FAILED_STATUSES)), 1), else_=0)).label("failed"),
+                    func.sum(case((c.kind == "response", 1), else_=0)).label("turns"),
+                    func.count(func.distinct(c.task_id)).label("tasks"),
+                    func.avg(case((is_tool, c.duration_ms), else_=None)).label("avg_duration"),
+                    func.max(c.created_at).label("last"),
+                ).where(*where)
+            )
+            .mappings()
+            .one()
+        )
+        # A finished task's response row holds the tokens of every model call in it; an
+        # unfinished task has only its tool calls, which carry their model calls' tokens.
+        per_task = conn.execute(
+            select(
+                func.sum(case((is_tool, c.total_tokens), else_=0)),
+                func.sum(case((c.kind == "response", c.total_tokens), else_=0)),
+            )
+            .where(*where)
+            .group_by(c.task_id)
+        ).all()
+        tokens = sum(float(turn or 0) or float(tool or 0) for tool, turn in per_task)
+        tool_calls = int(row["tool_calls"] or 0)
+        failed = int(row["failed"] or 0)
+        return {
+            "events": int(row["events"] or 0),
+            "tool_calls": tool_calls,
+            "failed_tool_calls": failed,
+            "failure_rate": round(failed / tool_calls, 4) if tool_calls else None,
+            "turns": int(row["turns"] or 0),
+            "tasks": int(row["tasks"] or 0),
+            "total_tokens": int(tokens),
+            "avg_tool_duration_ms": round(float(row["avg_duration"]), 1) if row["avg_duration"] is not None else None,
+            "last_activity": iso(row["last"]),
         }
 
     # ------------------------------------------------------------------
@@ -669,22 +737,30 @@ class DriftGuardService:
         were raised for newly blocked tasks or auto-resolved for recovered ones.
         """
         project_id = project["project_id"]
+        capture = bool(project.get("capture_content"))
         rows = []
         for item in batch:
             row = {key: item.get(key) for key in _AGENT_COLUMNS if key != "id"}
             row.update(
                 project_id=project_id,
+                kind=item.get("kind") or "tool_call",
+                tool_name=item.get("tool_name") or "",
+                status=item.get("status") or "info",
                 attempt=item.get("attempt") or 1,
                 error_message=self._clean(item.get("error_message")),
                 environment=item.get("environment") or project["environment"],
+                # Content is dropped unless the project owner opted in.
+                input_text=self._clean(item.get("input")) if capture else None,
+                output_text=self._clean(item.get("output")) if capture else None,
                 created_at=_event_time(item.get("occurred_at")),
             )
             rows.append(row)
         if not rows:
             return 0, []
+        tool_task_ids = {r["task_id"] for r in rows if r["kind"] == "tool_call"}
         with self.engine.begin() as conn:
             conn.execute(insert(agent_events), rows)
-            changed = self._update_task_alerts(conn, project_id, {r["task_id"] for r in rows})
+            changed = self._update_task_alerts(conn, project_id, tool_task_ids) if tool_task_ids else []
         return len(rows), changed
 
     def _update_task_alerts(self, conn: Connection, project_id: str, task_ids: set[str]) -> list[dict[str, Any]]:
@@ -697,6 +773,7 @@ class DriftGuardService:
                     and_(
                         agent_events.c.project_id == project_id,
                         agent_events.c.task_id.in_(task_ids),
+                        agent_events.c.kind == "tool_call",
                         agent_events.c.created_at >= window_start,
                     )
                 )
@@ -765,22 +842,61 @@ class DriftGuardService:
         environment: str | None = None,
         time_range: str = "all",
         task_id: str | None = None,
+        kind: str | None = None,
+        tool_name: str | None = None,
+        agent_name: str | None = None,
+        outcome: str | None = None,
+        search: str | None = None,
+        before_id: int | None = None,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
-        query = select(agent_events).where(agent_events.c.project_id == project_id)
+        """Agent activity, newest first. Filters combine with AND.
+
+        ``outcome`` is ``success`` or ``failed`` (the status groups the diagnosis
+        uses); ``search`` matches task, tool, agent, model, error text and stored
+        content, case-insensitively.
+        """
+        c = agent_events.c
+        query = select(agent_events).where(c.project_id == project_id)
         if environment:
-            query = query.where(agent_events.c.environment == environment)
+            query = query.where(c.environment == environment)
         if task_id:
-            query = query.where(agent_events.c.task_id == task_id)
+            query = query.where(c.task_id == task_id)
+        if kind:
+            query = query.where(c.kind == kind)
+        if tool_name:
+            query = query.where(c.tool_name == tool_name)
+        if agent_name:
+            query = query.where(c.agent_name == agent_name)
+        if outcome == "success":
+            query = query.where(c.status.in_(SUCCESS_STATUSES))
+        elif outcome == "failed":
+            query = query.where(c.status.in_(FAILED_STATUSES))
+        if search:
+            searchable = (
+                c.task_id,
+                c.tool_name,
+                c.agent_name,
+                c.model,
+                c.error_type,
+                c.error_message,
+                c.input_text,
+                c.output_text,
+            )
+            query = query.where(or_(*(col.icontains(search, autoescape=True) for col in searchable)))
+        if before_id is not None:
+            query = query.where(c.id < before_id)
         if (cutoff := _cutoff(time_range)) is not None:
-            query = query.where(agent_events.c.created_at >= cutoff)
+            query = query.where(c.created_at >= cutoff)
         with self.engine.connect() as conn:
-            rows = conn.execute(query.order_by(agent_events.c.id.desc()).limit(limit)).mappings().all()
+            rows = conn.execute(query.order_by(c.id.desc()).limit(limit)).mappings().all()
         return [_agent_dict(row) for row in rows]
 
     def diagnose(self, project_id: str, *, environment: str | None = None, time_range: str = "all") -> dict[str, Any]:
-        """Run the failed-tool diagnosis over recent agent events."""
-        recent = self.list_agent_events(project_id, environment=environment, time_range=time_range, limit=5000)
+        """Run the failed-tool diagnosis over recent tool calls (other activity kinds are ignored)."""
+        recent = self.list_agent_events(
+            project_id, environment=environment, time_range=time_range, kind="tool_call", limit=5000
+        )
         return analyze_agent_events(recent, self.get_policy(project_id))
 
     # ------------------------------------------------------------------

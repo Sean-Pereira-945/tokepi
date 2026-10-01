@@ -81,6 +81,7 @@ class MCPMiddleware:
                 duration_ms=duration_ms,
                 input_hash=input_hash,
                 tool_call_id=call_id,
+                input=params.get("arguments"),
             )
         elif (response.get("result") or {}).get("isError"):
             self.context.record_tool_call(
@@ -91,10 +92,17 @@ class MCPMiddleware:
                 duration_ms=duration_ms,
                 input_hash=input_hash,
                 tool_call_id=call_id,
+                input=params.get("arguments"),
             )
         else:
             self.context.record_tool_call(
-                tool_name, "success", duration_ms=duration_ms, input_hash=input_hash, tool_call_id=call_id
+                tool_name,
+                "success",
+                duration_ms=duration_ms,
+                input_hash=input_hash,
+                tool_call_id=call_id,
+                input=params.get("arguments"),
+                output=_text_content(response.get("result") or {}) or None,
             )
         return response
 
@@ -121,7 +129,12 @@ class _InstrumentedSession:
             result = await self._session.call_tool(name, arguments, *args, **kwargs)
         except Exception as exc:
             ctx.record_tool_call(
-                name, "failed", error=exc, input_hash=input_hash, duration_ms=(time.perf_counter() - started) * 1000
+                name,
+                "failed",
+                error=exc,
+                input_hash=input_hash,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                input=arguments,
             )
             raise
         duration_ms = (time.perf_counter() - started) * 1000
@@ -134,7 +147,15 @@ class _InstrumentedSession:
                 error_message=_text_content(result) or "MCP tool returned isError",
                 input_hash=input_hash,
                 duration_ms=duration_ms,
+                input=arguments,
             )
         else:
-            ctx.record_tool_call(name, "success", input_hash=input_hash, duration_ms=duration_ms)
+            ctx.record_tool_call(
+                name,
+                "success",
+                input_hash=input_hash,
+                duration_ms=duration_ms,
+                input=arguments,
+                output=_text_content(result) or None,
+            )
         return result
