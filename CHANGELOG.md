@@ -73,6 +73,8 @@ All notable changes to DriftGuard are recorded here. The format follows
   Existing agent events become `tool_call` events.
 
 ### Documentation
+- **`SETUP.md`**: a step-by-step guide for teammates, from a fresh laptop to
+  a running DriftGuard with sample data, on Windows, macOS and Linux.
 - **Getting started** (`docs/quickstart.md`) rewritten: three ways to run it
   (`demo.bat`, from source, Docker), four ways to send data (sample data, live
   demo, Claude Code, SDK), and a troubleshooting table.

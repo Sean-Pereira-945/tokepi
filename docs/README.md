@@ -6,6 +6,7 @@ New here? Read [How DriftGuard works](concepts.md), then
 ![DriftGuard architecture](images/architecture.svg)
 
 **Using DriftGuard**
+- [Team setup](../SETUP.md): from a fresh laptop to a running DriftGuard, step by step
 - [Getting started](quickstart.md): run it (one click, from source, or Docker), send data, troubleshooting
 - [How DriftGuard works](concepts.md): the problem, the data, scoring and diagnosis in plain language
 - [Dashboard guide](dashboard.md): every view, card and column, with screenshots

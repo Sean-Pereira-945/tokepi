@@ -40,6 +40,7 @@ it never changes prompts or providers. See
 
 | I want to… | Do this |
 | --- | --- |
+| Set it up on a teammate's laptop | Follow **[SETUP.md](SETUP.md)** |
 | See it running in two minutes (Windows) | Double-click **`demo.bat`**. Sign in as `demo@driftguard.local` / `driftguard-demo`. |
 | Run it from this repo | `pip install -e ".[server]"`, `cd frontend && npm ci && npm run build`, then `driftguard-server`. Details in [Getting started](docs/quickstart.md#b-from-source-windows-macos-linux). |
 | Fill the dashboard with sample data | `python examples/seed_showcase.py --api-key dg_live_... --project-id showcase` |
